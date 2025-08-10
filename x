@@ -732,39 +732,60 @@ local function sendChatMessage(msg)
     return ok
 end
 
-local autoChatComboActive = false
-local autoChatThread = nil
-local lastSentCombo = nil
-
-local function startAutoChatCombo()
-    if autoChatThread then task.cancel(autoChatThread) end
-    autoChatThread = task.spawn(function()
-        if comboCurrentCode and comboCurrentCode ~= lastSentCombo then
-            sendChatMessage(tostring(comboCurrentCode))
-            lastSentCombo = comboCurrentCode
-        end
-        while autoChatComboActive do
-            if comboCurrentCode and comboCurrentCode ~= lastSentCombo then
-                sendChatMessage(tostring(comboCurrentCode))
-                lastSentCombo = comboCurrentCode
-            end
-            task.wait(0.4)
-        end
-    end)
-end
-
 local ESPSection = Tabs.ESP:AddSection("ESP Toggles")
 
 local ComboCodeSection = Tabs.ESP:AddSection("Combination Puzzle")
 local comboUI = ComboCodeSection:AddParagraph({ Title = "Combination Code", Content = "—" })
 comboParagraph = comboUI
 
+local autoChatComboActive = false
+local autoChatWatcher = nil
+local lastSentCombo = nil
+local lastObservedCombo = nil
+local scheduleToken = 0
+local chatDelaySeconds = 20
+
+local function scheduleDelayedSend(code)
+    scheduleToken = scheduleToken + 1
+    local myToken = scheduleToken
+    task.delay(chatDelaySeconds, function()
+        if autoChatComboActive and myToken == scheduleToken and comboCurrentCode == code and lastSentCombo ~= code then
+            sendChatMessage("code: " .. tostring(code))
+            lastSentCombo = code
+        end
+    end)
+end
+
+local function startAutoChatCombo()
+    if autoChatWatcher then task.cancel(autoChatWatcher) end
+    lastObservedCombo = nil
+    autoChatWatcher = task.spawn(function()
+        while autoChatComboActive do
+            local code = comboCurrentCode
+            if code and code ~= "" and code ~= lastObservedCombo then
+                lastObservedCombo = code
+                scheduleDelayedSend(code)
+            end
+            task.wait(0.3)
+        end
+    end)
+    if comboCurrentCode and comboCurrentCode ~= "" and comboCurrentCode ~= lastSentCombo then
+        lastObservedCombo = comboCurrentCode
+        scheduleDelayedSend(comboCurrentCode)
+    end
+end
+
 ComboCodeSection:AddToggle("AutoChatComboToggle", {
     Title = "Auto Chat Combination Code",
     Default = false,
     Callback = function(state)
         autoChatComboActive = state
-        if state then startAutoChatCombo() else if autoChatThread then task.cancel(autoChatThread); autoChatThread=nil end end
+        if state then
+            startAutoChatCombo()
+        else
+            if autoChatWatcher then task.cancel(autoChatWatcher); autoChatWatcher=nil end
+            scheduleToken = scheduleToken + 1
+        end
     end
 })
 
@@ -958,7 +979,7 @@ ESPColorsSection:AddColorpicker("PuzzleObjectEspColor", {
 
 local PlayerMovementSection = Tabs.Player:AddSection("Movement")
 
-PlayerMovementSection:AddSlider("WalkSpeedSlider", {
+PlayerMovementSection:AddSlider("Walk Speed", {
     Title = "Walk Speed",
     Default = 16, Min = 16, Max = 45, Rounding = 0,
     Callback = function(value)
@@ -991,31 +1012,31 @@ PlayerMovementSection:AddButton({
         if speedLoop then task.cancel(speedLoop); speedLoop=nil end
     end
 })
-PlayerMovementSection:AddToggle("FlyToggle", {
+PlayerMovementSection:AddToggle("Fly (Local)", {
     Title = "Fly (Local)",
     Default = false,
     Callback = function(state) if state then enableFly() else disableFly() end end
 })
-PlayerMovementSection:AddSlider("FlySpeedSlider", {
+PlayerMovementSection:AddSlider("Fly Speed", {
     Title = "Fly Speed",
     Default = 50, Min = 1, Max = 200, Rounding = 0,
     Callback = function(value) flySpeed = value end
 })
-PlayerMovementSection:AddToggle("NoclipToggle", {
+PlayerMovementSection:AddToggle("Noclip", {
     Title = "Noclip",
     Default = false,
     Callback = function(state) if state then enableNoclip() else disableNoclip() end end
 })
 
 local PlayerUtilitySection = Tabs.Player:AddSection("Utility")
-PlayerUtilitySection:AddToggle("AntiAFKToggle", {
+PlayerUtilitySection:AddToggle("Anti-AFK", {
     Title = "Anti-AFK",
     Default = false,
     Callback = function(state) if state then enableAntiAfk() else disableAntiAfk() end end
 })
 
 local AutoSection = Tabs.Auto:AddSection("Auto Features")
-AutoSection:AddToggle("AutoCollectCoins", {
+AutoSection:AddToggle("Auto Collect Coins", {
     Title = "Auto Collect Coins",
     Default = false,
     Callback = function(state)
@@ -1028,7 +1049,7 @@ AutoSection:AddToggle("AutoCollectCoins", {
         end
     end
 })
-AutoSection:AddToggle("AutoDeletePeels", {
+AutoSection:AddToggle("Auto Delete Peels", {
     Title = "Auto Delete Peels",
     Default = false,
     Callback = function(state)
@@ -1041,7 +1062,7 @@ AutoSection:AddToggle("AutoDeletePeels", {
         end
     end
 })
-AutoSection:AddToggle("AutoDeleteLockers", {
+AutoSection:AddToggle("Auto Delete Lockers", {
     Title = "Auto Delete Lockers",
     Default = false,
     Callback = function(state)
@@ -1054,7 +1075,7 @@ AutoSection:AddToggle("AutoDeleteLockers", {
         end
     end
 })
-AutoSection:AddToggle("AutoKill", {
+AutoSection:AddToggle("Auto Kill", {
     Title = "Auto Kill",
     Default = false,
     Callback = function(state)
@@ -1067,14 +1088,14 @@ AutoSection:AddToggle("AutoKill", {
         end
     end
 })
-AutoSection:AddToggle("AntiKickBypass", {
+AutoSection:AddToggle("Anti Kick Bypass", {
     Title = "Anti Kick Bypass",
     Default = false,
     Callback = function(state) if state then startAntiKick() else stopAntiKick() end end
 })
 
 local VisualSection = Tabs.Visual
-VisualSection:AddToggle("FullbrightToggle", {
+VisualSection:AddToggle("Fullbright", {
     Title="Fullbright", Default=false,
     Callback=function(state)
         fullbrightActive = state
@@ -1089,7 +1110,7 @@ VisualSection:AddToggle("FullbrightToggle", {
         end
     end
 })
-VisualSection:AddToggle("NoFogToggle", {
+VisualSection:AddToggle("No Fog", {
     Title="No Fog", Default=false,
     Callback=function(state)
         noFogActive = state
@@ -1109,44 +1130,44 @@ VisualSection:AddToggle("NoFogToggle", {
         end
     end
 })
-VisualSection:AddToggle("ColorCorrectionToggle", {
+VisualSection:AddToggle("Color Correction", {
     Title="Color Correction", Default=false,
     Callback=function(state)
         ccActive = state
         if state then enableColorCorrection() else disableColorCorrection() end
     end
 })
-VisualSection:AddSlider("BrightnessSlider", {
+VisualSection:AddSlider("Brightness", {
     Title="Brightness", Default=0, Min=-1, Max=1, Rounding=2,
     Callback=function(value) ccBrightness=value; if ccActive and ccEffect then ccEffect.Brightness=value end end
 })
-VisualSection:AddSlider("ContrastSlider", {
+VisualSection:AddSlider("Contrast", {
     Title="Contrast", Default=0, Min=-2, Max=2, Rounding=2,
     Callback=function(value) ccContrast=value; if ccActive and ccEffect then ccEffect.Contrast=value end end
 })
-VisualSection:AddSlider("SaturationSlider", {
+VisualSection:AddSlider("Saturation", {
     Title="Saturation", Default=1, Min=0, Max=3, Rounding=2,
     Callback=function(value) ccSaturation=value; if ccActive and ccEffect then ccEffect.Saturation=value end end
 })
-VisualSection:AddToggle("SunRaysToggle", {
+VisualSection:AddToggle("Sun Rays", {
     Title="Sun Rays", Default=false,
     Callback=function(state) sunRaysActive=state; if state then enableSunRays() else disableSunRays() end end
 })
-VisualSection:AddSlider("SunRaysIntensitySlider", {
+VisualSection:AddSlider("Sun Rays Intensity", {
     Title="Sun Rays Intensity", Default=0.3, Min=0, Max=1, Rounding=2,
     Callback=function(value) sunRaysIntensity=value; if sunRaysActive and sunRaysEffect then sunRaysEffect.Intensity=value end end
 })
 
 local LightingSection = Tabs.Visual:AddSection("Lighting Controls")
-LightingSection:AddSlider("ClockTimeSlider", {
+LightingSection:AddSlider("Time of Day", {
     Title="Time of Day", Default=initialLighting.ClockTime, Min=0, Max=24, Rounding=1,
     Callback=function(value) Lighting.ClockTime = value end
 })
-LightingSection:AddSlider("ExposureSlider", {
+LightingSection:AddSlider("Exposure", {
     Title="Exposure", Default=initialLighting.ExposureCompensation, Min=-3, Max=3, Rounding=2,
     Callback=function(value) Lighting.ExposureCompensation = value end
 })
-LightingSection:AddToggle("ShadowsToggle", {
+LightingSection:AddToggle("Shadows", {
     Title="Shadows", Default=initialLighting.GlobalShadows,
     Callback=function(state) Lighting.GlobalShadows = state end
 })
