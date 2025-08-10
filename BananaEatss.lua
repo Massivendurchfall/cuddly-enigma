@@ -1,3 +1,6 @@
+-- BananaEats Loader — redeem-first, uses syn.request/http_request/request (no direct HttpService)
+-- GUI cleaned: proper layout (UIListLayout + UIPadding), readable spacing, no overlaps
+
 -- === CONFIG ===
 local API_BASE        = "https://odd-frog-e89b.dosrobert69.workers.dev/api"
 local WORKINK_LINK    = "https://workink.net/22K7/7kr50x5g"
@@ -119,6 +122,23 @@ local function createUI()
     f.BackgroundColor3=Color3.fromRGB(20,20,20)
     f.Active=true; f.Draggable=true; f.Parent=g
     Instance.new("UICorner",f).CornerRadius=UDim.new(0,12)
+    
+        -- Close Button
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0,28,0,28)
+    closeBtn.Position = UDim2.new(1,-32,0,4) -- oben rechts
+    closeBtn.AnchorPoint = Vector2.new(0,0)
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 14
+    closeBtn.Parent = f
+    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(1,0)
+    
+    closeBtn.MouseButton1Click:Connect(function()
+        if g then g:Destroy() end
+    end)
 
     local pad=Instance.new("UIPadding")
     pad.PaddingTop=UDim.new(0,12); pad.PaddingBottom=UDim.new(0,12)
