@@ -1,6 +1,3 @@
--- BananaEats Loader — redeem-first, uses syn.request/http_request/request (no direct HttpService)
--- GUI: English-only + explicit instructions how to get the key
-
 -- === CONFIG ===
 local API_BASE        = "https://odd-frog-e89b.dosrobert69.workers.dev/api"
 local WORKINK_LINK    = "https://workink.net/22K7/7kr50x5g"
@@ -106,58 +103,158 @@ local function loadCachedKey()
 end
 local function saveCachedKey(k) G.LICENSE_KEY=k; if CAN_FS then pcall(writefile, SAVE_FILENAME, k) end end
 
--- ---------- UI ----------
+-- ---------- UI (CLEAN LAYOUT) ----------
 local function createUI()
-    local g=Instance.new("ScreenGui"); g.Name="BananaKeyGate"; g.ResetOnSpawn=false; if syn and syn.protect_gui then pcall(syn.protect_gui,g) end; g.Parent=game.CoreGui
+    local g=Instance.new("ScreenGui")
+    g.Name="BananaKeyGate"
+    g.ResetOnSpawn=false
+    if syn and syn.protect_gui then pcall(syn.protect_gui,g) end
+    g.Parent=game.CoreGui
 
-    local f=Instance.new("Frame"); f.Size=UDim2.new(0,560,0,260); f.Position=UDim2.new(0.5,-280,0.5,-130)
-    f.BackgroundColor3=Color3.fromRGB(20,20,20); f.Active=true; f.Draggable=true; f.Parent=g; Instance.new("UICorner",f).CornerRadius=UDim.new(0,12)
+    -- Root frame (auto height), padded & stacked
+    local f=Instance.new("Frame")
+    f.Size=UDim2.new(0,560,0,0)                 -- width fixed, height auto
+    f.AutomaticSize=Enum.AutomaticSize.Y
+    f.Position=UDim2.new(0.5,-280,0.5,-150)
+    f.BackgroundColor3=Color3.fromRGB(20,20,20)
+    f.Active=true; f.Draggable=true; f.Parent=g
+    Instance.new("UICorner",f).CornerRadius=UDim.new(0,12)
 
-    local title=Instance.new("TextLabel"); title.Size=UDim2.new(1,-20,0,36); title.Position=UDim2.new(0,10,0,10)
-    title.Text="Banana Eats — License Check"; title.TextColor3=Color3.new(1,1,1); title.BackgroundTransparency=1
-    title.TextXAlignment=Enum.TextXAlignment.Left; title.Font=Enum.Font.GothamBold; title.TextSize=18; title.Parent=f
+    local pad=Instance.new("UIPadding")
+    pad.PaddingTop=UDim.new(0,12); pad.PaddingBottom=UDim.new(0,12)
+    pad.PaddingLeft=UDim.new(0,12); pad.PaddingRight=UDim.new(0,12)
+    pad.Parent=f
 
-    local status=Instance.new("TextLabel"); status.Size=UDim2.new(1,-20,0,22); status.Position=UDim2.new(0,10,0,46)
+    local list=Instance.new("UIListLayout")
+    list.FillDirection=Enum.FillDirection.Vertical
+    list.SortOrder=Enum.SortOrder.LayoutOrder
+    list.Padding=UDim.new(0,10)
+    list.Parent=f
+
+    -- Title
+    local title=Instance.new("TextLabel")
+    title.LayoutOrder=1
+    title.Size=UDim2.new(1,0,0,28)
+    title.Text="Banana Eats — License Check"
+    title.TextColor3=Color3.new(1,1,1)
+    title.BackgroundTransparency=1
+    title.TextXAlignment=Enum.TextXAlignment.Left
+    title.Font=Enum.Font.GothamBold
+    title.TextSize=20
+    title.Parent=f
+
+    -- Status
+    local status=Instance.new("TextLabel")
+    status.LayoutOrder=2
+    status.Size=UDim2.new(1,0,0,20)
     status.Text=(REQ and "Paste your license key OR your Work.ink token below.") or "Your executor blocks HTTP (syn.request/http_request missing)."
-    status.TextColor3=Color3.fromRGB(200,200,200); status.BackgroundTransparency=1; status.TextXAlignment=Enum.TextXAlignment.Left
-    status.Font=Enum.Font.Gotham; status.TextSize=14; status.Name="Status"; status.Parent=f
+    status.TextColor3=Color3.fromRGB(200,200,200)
+    status.BackgroundTransparency=1
+    status.TextXAlignment=Enum.TextXAlignment.Left
+    status.Font=Enum.Font.Gotham
+    status.TextSize=14
+    status.Name="Status"
+    status.Parent=f
 
-    -- Instructions box (English-only, explicit steps)
-    local help=Instance.new("TextLabel"); help.Size=UDim2.new(1,-20,0,80); help.Position=UDim2.new(0,10,0,70)
-    help.BackgroundColor3=Color3.fromRGB(28,28,28); help.TextXAlignment=Enum.TextXAlignment.Left; help.TextYAlignment=Enum.TextYAlignment.Top
-    help.TextColor3=Color3.fromRGB(220,220,220); help.Font=Enum.Font.Gotham; help.TextSize=12; help.RichText=true
+    -- Help panel
+    local helpFrame=Instance.new("Frame")
+    helpFrame.LayoutOrder=3
+    helpFrame.Size=UDim2.new(1,0,0,0)
+    helpFrame.AutomaticSize=Enum.AutomaticSize.Y
+    helpFrame.BackgroundColor3=Color3.fromRGB(28,28,28)
+    helpFrame.Parent=f
+    Instance.new("UICorner",helpFrame).CornerRadius=UDim.new(0,8)
+
+    local helpPad=Instance.new("UIPadding")
+    helpPad.PaddingTop=UDim.new(0,10); helpPad.PaddingBottom=UDim.new(0,10)
+    helpPad.PaddingLeft=UDim.new(0,10); helpPad.PaddingRight=UDim.new(0,10)
+    helpPad.Parent=helpFrame
+
+    local help=Instance.new("TextLabel")
+    help.Size=UDim2.new(1,0,0,0)
+    help.AutomaticSize=Enum.AutomaticSize.Y
+    help.TextWrapped=true
+    help.RichText=true
+    help.TextXAlignment=Enum.TextXAlignment.Left
+    help.TextYAlignment=Enum.TextYAlignment.Top
+    help.TextColor3=Color3.fromRGB(220,220,220)
+    help.Font=Enum.Font.Gotham
+    help.TextSize=13
+    help.Parent=helpFrame
     help.Text = table.concat({
         "How to get the key:",
         "\n1) Click <b>Copy Work.ink Link</b>.",
-        "\n2) Press <b>Ctrl+V</b> (or long-press → Paste) in your web browser’s address bar.",
+        "\n2) Open your browser and paste (Ctrl+V / long-press → Paste) into the address bar.",
         "\n3) Complete the steps on Work.ink until you see a <b>token</b> or key.",
-        "\n4) Copy that <b>token/key</b> and paste it here.",
+        "\n4) Copy that <b>token/key</b> and paste it below.",
         "\n5) Press <b>Continue</b>. The loader will redeem/validate automatically."
-    },""); help.Parent=f; Instance.new("UICorner",help).CornerRadius=UDim.new(0,8)
+    },"")
 
-    local box=Instance.new("TextBox"); box.Size=UDim2.new(1,-20,0,34); box.Position=UDim2.new(0,10,0,156)
-    box.PlaceholderText="Paste license key OR Work.ink token here"; box.Text=""
-    box.TextColor3=Color3.new(1,1,1); box.BackgroundColor3=Color3.fromRGB(35,35,35); box.ClearTextOnFocus=false
-    box.Font=Enum.Font.Gotham; box.TextSize=14; Instance.new("UICorner",box).CornerRadius=UDim.new(0,8); box.Parent=f
+    -- Input
+    local box=Instance.new("TextBox")
+    box.LayoutOrder=4
+    box.Size=UDim2.new(1,0,0,36)
+    box.PlaceholderText="Paste license key OR Work.ink token here"
+    box.Text=""
+    box.TextColor3=Color3.new(1,1,1)
+    box.BackgroundColor3=Color3.fromRGB(35,35,35)
+    box.ClearTextOnFocus=false
+    box.Font=Enum.Font.Gotham
+    box.TextSize=14
+    Instance.new("UICorner",box).CornerRadius=UDim.new(0,8)
+    box.Parent=f
 
-    local go=Instance.new("TextButton"); go.Size=UDim2.new(0,180,0,34); go.Position=UDim2.new(0,10,0,200)
-    go.Text="Continue"; go.TextColor3=Color3.new(1,1,1); go.BackgroundColor3=Color3.fromRGB(40,100,220)
-    go.Font=Enum.Font.GothamBold; go.TextSize=14; Instance.new("UICorner",go).CornerRadius=UDim.new(0,8); go.Parent=f
+    -- Buttons row
+    local btnRow=Instance.new("Frame")
+    btnRow.LayoutOrder=5
+    btnRow.Size=UDim2.new(1,0,0,36)
+    btnRow.BackgroundTransparency=1
+    btnRow.Parent=f
 
-    local clip=Instance.new("TextButton"); clip.Size=UDim2.new(0,160,0,34); clip.Position=UDim2.new(0,200,0,200)
-    clip.Text="Paste from Clipboard"; clip.TextColor3=Color3.new(1,1,1); clip.BackgroundColor3=Color3.fromRGB(60,60,60)
-    clip.Font=Enum.Font.Gotham; clip.TextSize=14; Instance.new("UICorner",clip).CornerRadius=UDim.new(0,8); clip.Parent=f
+    local btnList=Instance.new("UIListLayout")
+    btnList.FillDirection=Enum.FillDirection.Horizontal
+    btnList.HorizontalAlignment=Enum.HorizontalAlignment.Left
+    btnList.VerticalAlignment=Enum.VerticalAlignment.Center
+    btnList.Padding=UDim.new(0,10)
+    btnList.Parent=btnRow
 
-    local copyLink=Instance.new("TextButton"); copyLink.Size=UDim2.new(1,-20,0,26); copyLink.Position=UDim2.new(0,10,1,-34)
+    local go=Instance.new("TextButton")
+    go.Size=UDim2.new(0.45,0,1,0)
+    go.Text="Continue"
+    go.TextColor3=Color3.new(1,1,1)
+    go.BackgroundColor3=Color3.fromRGB(40,100,220)
+    go.Font=Enum.Font.GothamBold
+    go.TextSize=14
+    Instance.new("UICorner",go).CornerRadius=UDim.new(0,8)
+    go.Parent=btnRow
+
+    local clip=Instance.new("TextButton")
+    clip.Size=UDim2.new(0.45,0,1,0)
+    clip.Text="Paste from Clipboard"
+    clip.TextColor3=Color3.new(1,1,1)
+    clip.BackgroundColor3=Color3.fromRGB(60,60,60)
+    clip.Font=Enum.Font.Gotham
+    clip.TextSize=14
+    Instance.new("UICorner",clip).CornerRadius=UDim.new(0,8)
+    clip.Parent=btnRow
+
+    -- Copy Work.ink link (separate row, never overlaps)
+    local copyLink=Instance.new("TextButton")
+    copyLink.LayoutOrder=6
+    copyLink.Size=UDim2.new(1,0,0,30)
     copyLink.Text="➡ Copy Work.ink link (paste it into your browser):  "..WORKINK_LINK
-    copyLink.TextColor3=Color3.fromRGB(220,220,220); copyLink.BackgroundColor3=Color3.fromRGB(45,45,45)
-    copyLink.TextXAlignment=Enum.TextXAlignment.Left; copyLink.Font=Enum.Font.Gotham; copyLink.TextSize=12
-    Instance.new("UICorner",copyLink).CornerRadius=UDim.new(0,6); copyLink.Parent=f
+    copyLink.TextColor3=Color3.fromRGB(220,220,220)
+    copyLink.BackgroundColor3=Color3.fromRGB(45,45,45)
+    copyLink.TextXAlignment=Enum.TextXAlignment.Left
+    copyLink.Font=Enum.Font.Gotham
+    copyLink.TextSize=12
+    Instance.new("UICorner",copyLink).CornerRadius=UDim.new(0,6)
+    copyLink.Parent=f
 
     copyLink.MouseButton1Click:Connect(function()
         if typeof(setclipboard)=="function" then
             pcall(setclipboard, WORKINK_LINK)
-            status.Text="Work.ink link copied. Open your browser, paste (Ctrl+V), finish steps, then copy the token."
+            status.Text="Link copied. Open your browser, paste (Ctrl+V), finish steps, then copy the token."
         else
             status.Text="Cannot copy automatically. Manually copy this link: "..WORKINK_LINK
         end
@@ -181,7 +278,6 @@ end
 
 local Gui, Status, InputBox, ContinueBtn = createUI()
 if not REQ then
-    -- Still allow manual key entry if executor suddenly exposes request later; otherwise we stop here.
     warn("[BananaEats] No HTTP function available (syn.request/http_request/request).")
 end
 
@@ -211,7 +307,7 @@ ContinueBtn.MouseButton1Click:Connect(function()
         return
     end
 
-    -- 1) ALWAYS try redeem first (token case)
+    -- 1) Try redeem (token)
     Status.Text = "Redeeming your token on the server..."
     local lic, err = redeemToken(text)
     if lic then
@@ -232,7 +328,7 @@ ContinueBtn.MouseButton1Click:Connect(function()
         return
     end
 
-    -- 2) If redeem says token problem -> treat as KEY validate
+    -- 2) If redeem says token issue -> treat as key
     if tostring(err):find("token_invalid") or tostring(err):find("bad_request_no_token") then
         Status.Text = "Redeem says '"..tostring(err).."'. Trying as license key..."
         local ok, reason = validateLicense(text)
@@ -246,7 +342,6 @@ ContinueBtn.MouseButton1Click:Connect(function()
             Status.Text="License invalid: "..tostring(reason)
         end
     else
-        -- other errors (e.g. HTML body) -> show raw hint
         Status.Text = "Redeem failed: "..tostring(err)..". If you used a token, re-check the browser steps."
         warn("[BananaEats] Redeem error: "..tostring(err))
     end
