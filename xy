@@ -1,368 +1,1073 @@
--- BananaEats Loader — redeem-first, uses syn.request/http_request/request (no direct HttpService)
--- GUI cleaned: proper layout (UIListLayout + UIPadding), readable spacing, no overlaps
-
--- === CONFIG ===
-local API_BASE        = "https://odd-frog-e89b.dosrobert69.workers.dev/api"
-local WORKINK_LINK    = "https://workink.net/22K7/7kr50x5g"
-local MAIN_SCRIPT_URL = "https://raw.githubusercontent.com/Massivendurchfall/cuddly-enigma/refs/heads/main/x"
-local LICENSE_DAYS    = 1
-local SAVE_FILENAME   = "banana_key.txt"
--- === END CONFIG ===
-
 local Players = game:GetService("Players")
-local USER_ID = Players.LocalPlayer and Players.LocalPlayer.UserId or 0
-local CAN_FS  = (typeof(isfile)=="function" and typeof(writefile)=="function" and typeof(readfile)=="function")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
-getgenv().BANANA_EATS = getgenv().BANANA_EATS or {}
-local G = getgenv().BANANA_EATS
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
--- ---------- Tiny JSON helpers (no HttpService) ----------
-local function esc(s) s=tostring(s or "") s=s:gsub('\\','\\\\'):gsub('"','\\"'):gsub('\n','\\n'):gsub('\r','\\r'):gsub('\t','\\t'); return '"'..s..'"' end
-local function json_encode(t)
-    local p = {}
-    for k,v in pairs(t or {}) do
-        local tv = typeof(v)
-        local val = (tv=="string" and esc(v)) or (tv=="number" and tostring(v)) or (tv=="boolean" and (v and "true" or "false")) or "null"
-        p[#p+1] = esc(k)..":"..val
-    end
-    return "{"..table.concat(p,",").."}"
-end
-local function soft_parse(body)
-    local o = {}
-    if type(body)~="string" then return o end
-    o.ok          = body:find('\"ok\"%s*:%s*true') ~= nil
-    o.error       = body:match('\"error\"%s*:%s*\"([^\"]+)\"')
-    o.license_key = body:match('\"license_key\"%s*:%s*\"([0-9a-fA-F%-]+)\"')
-    return o
-end
-
--- ---------- HTTP requester pick ----------
-local function pickRequester()
-    if syn and typeof(syn.request)=="function" then return syn.request end
-    if http and typeof(http.request)=="function" then return http.request end
-    if typeof(http_request)=="function" then return http_request end
-    if typeof(request)=="function" then return request end
-    return nil
-end
-local REQ = pickRequester()
-
-local COMMON_HEADERS = {
-    ["Content-Type"] = "application/json",
-    ["User-Agent"]   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
+-- Settings
+local settings = {
+    toggleKey = Enum.KeyCode.C
 }
 
-local function httpReqJson(url, method, bodyTbl)
-    if not REQ then return nil, "no_http_available" end
-    local bodyStr = bodyTbl and json_encode(bodyTbl) or nil
-    local ok, r = pcall(REQ, { Url=url, Method=method, Headers=COMMON_HEADERS, Body=bodyStr })
-    if not ok or not r then return nil, "request_failed" end
-    local status = r.StatusCode or r.Status or 0
-    local body   = r.Body or ""
-    local parsed = soft_parse(body)
-    return { status=status, body=body, json=parsed }
-end
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "INK_GAME_GUI"
+screenGui.Parent = playerGui
 
-local function urlEncode(s) s=tostring(s or "") return (s:gsub("([^%w%-_%.~])", function(c) return string.format("%%%02X", string.byte(c)) end)) end
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 260, 0, 440)
+mainFrame.Position = UDim2.new(0, 50, 0, 50)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
 
--- ---------- API wrappers (redeem first) ----------
-local function redeemToken(tok)
-    -- POST
-    local r = httpReqJson(API_BASE.."/redeem_workink.php","POST",{workink_token=tok,roblox_user_id=USER_ID,license_days=LICENSE_DAYS})
-    if r and r.status>=200 and r.json and r.json.ok and r.json.license_key then return r.json.license_key,nil end
-    -- GET fallback
-    local url = ("%s/redeem_workink.php?workink_token=%s&roblox_user_id=%d&license_days=%d"):format(API_BASE, urlEncode(tok), USER_ID, LICENSE_DAYS)
-    r = httpReqJson(url,"GET")
-    if r and r.status>=200 and r.json and r.json.ok and r.json.license_key then return r.json.license_key,nil end
-    local err = (r and r.json and r.json.error) or (r and ("http_"..r.status)) or "network_error"
-    if r and r.status==200 and (not r.json or (not r.json.ok and not r.json.error)) then
-        err = "http_200 body_snip="..string.sub(r.body or "",1,120)
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = mainFrame
+
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 40)
+titleBar.Position = UDim2.new(0, 0, 0, 0)
+titleBar.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 12)
+titleCorner.Parent = titleBar
+
+local titleBorder = Instance.new("Frame")
+titleBorder.Name = "TitleBorder"
+titleBorder.Size = UDim2.new(1, -20, 0, 12)
+titleBorder.Position = UDim2.new(0, 10, 1, -12)
+titleBorder.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+titleBorder.BorderSizePixel = 0
+titleBorder.Parent = titleBar
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "TitleLabel"
+titleLabel.Size = UDim2.new(1, -50, 1, 0)
+titleLabel.Position = UDim2.new(0, 15, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "INK"
+titleLabel.TextColor3 = Color3.fromRGB(220, 220, 230)
+titleLabel.TextSize = 16
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = titleBar
+
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "CloseButton"
+closeButton.Size = UDim2.new(0, 30, 0, 30)
+closeButton.Position = UDim2.new(1, -35, 0, 5)
+closeButton.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+closeButton.BorderSizePixel = 0
+closeButton.Text = "×"
+closeButton.TextColor3 = Color3.fromRGB(180, 180, 190)
+closeButton.TextSize = 18
+closeButton.Font = Enum.Font.GothamBold
+closeButton.Parent = titleBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 8)
+closeCorner.Parent = closeButton
+
+local contentFrame = Instance.new("Frame")
+contentFrame.Name = "ContentFrame"
+contentFrame.Size = UDim2.new(1, -24, 1, -80)
+contentFrame.Position = UDim2.new(0, 12, 0, 50)
+contentFrame.BackgroundTransparency = 1
+contentFrame.Parent = mainFrame
+
+-- Status Label
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Name = "StatusLabel"
+statusLabel.Size = UDim2.new(1, 0, 0, 16)
+statusLabel.Position = UDim2.new(0, 0, 0, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Hotkey: " .. settings.toggleKey.Name .. " • Click any Player to Target"
+statusLabel.TextColor3 = Color3.fromRGB(120, 120, 140)
+statusLabel.TextSize = 11
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = contentFrame
+
+-- ESP Section
+local espFrame = Instance.new("Frame")
+espFrame.Name = "ESPFrame"
+espFrame.Size = UDim2.new(1, 0, 0, 40)
+espFrame.Position = UDim2.new(0, 0, 0, 25)
+espFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+espFrame.BorderSizePixel = 0
+espFrame.Parent = contentFrame
+
+local espFrameCorner = Instance.new("UICorner")
+espFrameCorner.CornerRadius = UDim.new(0, 8)
+espFrameCorner.Parent = espFrame
+
+local espLabel = Instance.new("TextLabel")
+espLabel.Name = "ESPLabel"
+espLabel.Size = UDim2.new(1, -60, 1, 0)
+espLabel.Position = UDim2.new(0, 12, 0, 0)
+espLabel.BackgroundTransparency = 1
+espLabel.Text = "ESP / Chams"
+espLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
+espLabel.TextSize = 14
+espLabel.Font = Enum.Font.Gotham
+espLabel.TextXAlignment = Enum.TextXAlignment.Left
+espLabel.Parent = espFrame
+
+local espToggle = Instance.new("TextButton")
+espToggle.Name = "ESPToggle"
+espToggle.Size = UDim2.new(0, 45, 0, 24)
+espToggle.Position = UDim2.new(1, -53, 0.5, -12)
+espToggle.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+espToggle.BorderSizePixel = 0
+espToggle.Text = ""
+espToggle.Parent = espFrame
+
+local espToggleCorner = Instance.new("UICorner")
+espToggleCorner.CornerRadius = UDim.new(0, 12)
+espToggleCorner.Parent = espToggle
+
+local espKnob = Instance.new("Frame")
+espKnob.Name = "ESPKnob"
+espKnob.Size = UDim2.new(0, 18, 0, 18)
+espKnob.Position = UDim2.new(0, 3, 0.5, -9)
+espKnob.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
+espKnob.BorderSizePixel = 0
+espKnob.Parent = espToggle
+
+local espKnobCorner = Instance.new("UICorner")
+espKnobCorner.CornerRadius = UDim.new(0, 9)
+espKnobCorner.Parent = espKnob
+
+-- Infinite Jump
+local infJumpFrame = Instance.new("Frame")
+infJumpFrame.Name = "InfJumpFrame"
+infJumpFrame.Size = UDim2.new(1, 0, 0, 40)
+infJumpFrame.Position = UDim2.new(0, 0, 0, 75)
+infJumpFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+infJumpFrame.BorderSizePixel = 0
+infJumpFrame.Parent = contentFrame
+
+local infJumpFrameCorner = Instance.new("UICorner")
+infJumpFrameCorner.CornerRadius = UDim.new(0, 8)
+infJumpFrameCorner.Parent = infJumpFrame
+
+local infJumpLabel = Instance.new("TextLabel")
+infJumpLabel.Name = "InfJumpLabel"
+infJumpLabel.Size = UDim2.new(1, -60, 1, 0)
+infJumpLabel.Position = UDim2.new(0, 12, 0, 0)
+infJumpLabel.BackgroundTransparency = 1
+infJumpLabel.Text = "Infinite Jump"
+infJumpLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
+infJumpLabel.TextSize = 14
+infJumpLabel.Font = Enum.Font.Gotham
+infJumpLabel.TextXAlignment = Enum.TextXAlignment.Left
+infJumpLabel.Parent = infJumpFrame
+
+local infJumpToggle = Instance.new("TextButton")
+infJumpToggle.Name = "InfJumpToggle"
+infJumpToggle.Size = UDim2.new(0, 45, 0, 24)
+infJumpToggle.Position = UDim2.new(1, -53, 0.5, -12)
+infJumpToggle.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+infJumpToggle.BorderSizePixel = 0
+infJumpToggle.Text = ""
+infJumpToggle.Parent = infJumpFrame
+
+local infJumpToggleCorner = Instance.new("UICorner")
+infJumpToggleCorner.CornerRadius = UDim.new(0, 12)
+infJumpToggleCorner.Parent = infJumpToggle
+
+local infJumpKnob = Instance.new("Frame")
+infJumpKnob.Name = "InfJumpKnob"
+infJumpKnob.Size = UDim2.new(0, 18, 0, 18)
+infJumpKnob.Position = UDim2.new(0, 3, 0.5, -9)
+infJumpKnob.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
+infJumpKnob.BorderSizePixel = 0
+infJumpKnob.Parent = infJumpToggle
+
+local infJumpKnobCorner = Instance.new("UICorner")
+infJumpKnobCorner.CornerRadius = UDim.new(0, 9)
+infJumpKnobCorner.Parent = infJumpKnob
+
+-- Noclip
+local noclipFrame = Instance.new("Frame")
+noclipFrame.Name = "NoclipFrame"
+noclipFrame.Size = UDim2.new(1, 0, 0, 40)
+noclipFrame.Position = UDim2.new(0, 0, 0, 125)
+noclipFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+noclipFrame.BorderSizePixel = 0
+noclipFrame.Parent = contentFrame
+
+local noclipFrameCorner = Instance.new("UICorner")
+noclipFrameCorner.CornerRadius = UDim.new(0, 8)
+noclipFrameCorner.Parent = noclipFrame
+
+local noclipLabel = Instance.new("TextLabel")
+noclipLabel.Name = "NoclipLabel"
+noclipLabel.Size = UDim2.new(1, -60, 1, 0)
+noclipLabel.Position = UDim2.new(0, 12, 0, 0)
+noclipLabel.BackgroundTransparency = 1
+noclipLabel.Text = "Noclip"
+noclipLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
+noclipLabel.TextSize = 14
+noclipLabel.Font = Enum.Font.Gotham
+noclipLabel.TextXAlignment = Enum.TextXAlignment.Left
+noclipLabel.Parent = noclipFrame
+
+local noclipToggle = Instance.new("TextButton")
+noclipToggle.Name = "NoclipToggle"
+noclipToggle.Size = UDim2.new(0, 45, 0, 24)
+noclipToggle.Position = UDim2.new(1, -53, 0.5, -12)
+noclipToggle.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+noclipToggle.BorderSizePixel = 0
+noclipToggle.Text = ""
+noclipToggle.Parent = noclipFrame
+
+local noclipToggleCorner = Instance.new("UICorner")
+noclipToggleCorner.CornerRadius = UDim.new(0, 12)
+noclipToggleCorner.Parent = noclipToggle
+
+local noclipKnob = Instance.new("Frame")
+noclipKnob.Name = "NoclipKnob"
+noclipKnob.Size = UDim2.new(0, 18, 0, 18)
+noclipKnob.Position = UDim2.new(0, 3, 0.5, -9)
+noclipKnob.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
+noclipKnob.BorderSizePixel = 0
+noclipKnob.Parent = noclipToggle
+
+local noclipKnobCorner = Instance.new("UICorner")
+noclipKnobCorner.CornerRadius = UDim.new(0, 9)
+noclipKnobCorner.Parent = noclipKnob
+
+-- Teleport Buttons
+local teleportFrame = Instance.new("Frame")
+teleportFrame.Name = "TeleportFrame"
+teleportFrame.Size = UDim2.new(1, 0, 0, 40)
+teleportFrame.Position = UDim2.new(0, 0, 0, 175)
+teleportFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+teleportFrame.BorderSizePixel = 0
+teleportFrame.Parent = contentFrame
+
+local teleportCorner = Instance.new("UICorner")
+teleportCorner.CornerRadius = UDim.new(0, 8)
+teleportCorner.Parent = teleportFrame
+
+local redLightButton = Instance.new("TextButton")
+redLightButton.Name = "RedLightButton"
+redLightButton.Size = UDim2.new(0.48, 0, 0, 28)
+redLightButton.Position = UDim2.new(0, 8, 0.5, -14)
+redLightButton.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
+redLightButton.BorderSizePixel = 0
+redLightButton.Text = "Red Light"
+redLightButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+redLightButton.TextSize = 12
+redLightButton.Font = Enum.Font.GothamBold
+redLightButton.Parent = teleportFrame
+
+local redLightButtonCorner = Instance.new("UICorner")
+redLightButtonCorner.CornerRadius = UDim.new(0, 6)
+redLightButtonCorner.Parent = redLightButton
+
+local teleportButton = Instance.new("TextButton")
+teleportButton.Name = "TeleportButton"
+teleportButton.Size = UDim2.new(0.48, 0, 0, 28)
+teleportButton.Position = UDim2.new(0.52, 0, 0.5, -14)
+teleportButton.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
+teleportButton.BorderSizePixel = 0
+teleportButton.Text = "Glass End"
+teleportButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+teleportButton.TextSize = 12
+teleportButton.Font = Enum.Font.GothamBold
+teleportButton.Parent = teleportFrame
+
+local teleportButtonCorner = Instance.new("UICorner")
+teleportButtonCorner.CornerRadius = UDim.new(0, 6)
+teleportButtonCorner.Parent = teleportButton
+
+-- Walk Speed
+local walkSpeedFrame = Instance.new("Frame")
+walkSpeedFrame.Name = "WalkSpeedFrame"
+walkSpeedFrame.Size = UDim2.new(1, 0, 0, 50)
+walkSpeedFrame.Position = UDim2.new(0, 0, 0, 225)
+walkSpeedFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+walkSpeedFrame.BorderSizePixel = 0
+walkSpeedFrame.Parent = contentFrame
+
+local walkSpeedFrameCorner = Instance.new("UICorner")
+walkSpeedFrameCorner.CornerRadius = UDim.new(0, 8)
+walkSpeedFrameCorner.Parent = walkSpeedFrame
+
+local walkSpeedLabel = Instance.new("TextLabel")
+walkSpeedLabel.Name = "WalkSpeedLabel"
+walkSpeedLabel.Size = UDim2.new(1, -50, 0, 20)
+walkSpeedLabel.Position = UDim2.new(0, 12, 0, 8)
+walkSpeedLabel.BackgroundTransparency = 1
+walkSpeedLabel.Text = "Walk Speed"
+walkSpeedLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
+walkSpeedLabel.TextSize = 14
+walkSpeedLabel.Font = Enum.Font.Gotham
+walkSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
+walkSpeedLabel.Parent = walkSpeedFrame
+
+local walkSpeedValue = Instance.new("TextLabel")
+walkSpeedValue.Name = "WalkSpeedValue"
+walkSpeedValue.Size = UDim2.new(0, 35, 0, 20)
+walkSpeedValue.Position = UDim2.new(1, -47, 0, 8)
+walkSpeedValue.BackgroundTransparency = 1
+walkSpeedValue.Text = "25"
+walkSpeedValue.TextColor3 = Color3.fromRGB(70, 130, 255)
+walkSpeedValue.TextSize = 14
+walkSpeedValue.Font = Enum.Font.GothamBold
+walkSpeedValue.TextXAlignment = Enum.TextXAlignment.Center
+walkSpeedValue.Parent = walkSpeedFrame
+
+local walkSpeedSlider = Instance.new("Frame")
+walkSpeedSlider.Name = "WalkSpeedSlider"
+walkSpeedSlider.Size = UDim2.new(1, -24, 0, 6)
+walkSpeedSlider.Position = UDim2.new(0, 12, 0, 35)
+walkSpeedSlider.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+walkSpeedSlider.BorderSizePixel = 0
+walkSpeedSlider.Parent = walkSpeedFrame
+
+local walkSpeedSliderCorner = Instance.new("UICorner")
+walkSpeedSliderCorner.CornerRadius = UDim.new(0, 3)
+walkSpeedSliderCorner.Parent = walkSpeedSlider
+
+local walkSpeedKnob = Instance.new("TextButton")
+walkSpeedKnob.Name = "WalkSpeedKnob"
+walkSpeedKnob.Size = UDim2.new(0, 16, 0, 16)
+walkSpeedKnob.Position = UDim2.new(0.11, -8, 0.5, -8)
+walkSpeedKnob.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
+walkSpeedKnob.BorderSizePixel = 0
+walkSpeedKnob.Text = ""
+walkSpeedKnob.Parent = walkSpeedSlider
+
+local walkSpeedKnobCorner = Instance.new("UICorner")
+walkSpeedKnobCorner.CornerRadius = UDim.new(0, 8)
+walkSpeedKnobCorner.Parent = walkSpeedKnob
+
+-- Follow Player Section
+local followPlayerFrame = Instance.new("Frame")
+followPlayerFrame.Name = "FollowPlayerFrame"
+followPlayerFrame.Size = UDim2.new(1, 0, 0, 85)
+followPlayerFrame.Position = UDim2.new(0, 0, 0, 285)
+followPlayerFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+followPlayerFrame.BorderSizePixel = 0
+followPlayerFrame.Parent = contentFrame
+
+local followFrameCorner = Instance.new("UICorner")
+followFrameCorner.CornerRadius = UDim.new(0, 8)
+followFrameCorner.Parent = followPlayerFrame
+
+local followPlayerLabel = Instance.new("TextLabel")
+followPlayerLabel.Name = "FollowPlayerLabel"
+followPlayerLabel.Size = UDim2.new(1, -60, 0, 20)
+followPlayerLabel.Position = UDim2.new(0, 12, 0, 8)
+followPlayerLabel.BackgroundTransparency = 1
+followPlayerLabel.Text = "Follow Player"
+followPlayerLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
+followPlayerLabel.TextSize = 14
+followPlayerLabel.Font = Enum.Font.Gotham
+followPlayerLabel.TextXAlignment = Enum.TextXAlignment.Left
+followPlayerLabel.Parent = followPlayerFrame
+
+local followPlayerToggle = Instance.new("TextButton")
+followPlayerToggle.Name = "FollowPlayerToggle"
+followPlayerToggle.Size = UDim2.new(0, 45, 0, 24)
+followPlayerToggle.Position = UDim2.new(1, -53, 0, 6)
+followPlayerToggle.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+followPlayerToggle.BorderSizePixel = 0
+followPlayerToggle.Text = ""
+followPlayerToggle.Parent = followPlayerFrame
+
+local followToggleCorner = Instance.new("UICorner")
+followToggleCorner.CornerRadius = UDim.new(0, 12)
+followToggleCorner.Parent = followPlayerToggle
+
+local followToggleKnob = Instance.new("Frame")
+followToggleKnob.Name = "ToggleKnob"
+followToggleKnob.Size = UDim2.new(0, 18, 0, 18)
+followToggleKnob.Position = UDim2.new(0, 3, 0.5, -9)
+followToggleKnob.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
+followToggleKnob.BorderSizePixel = 0
+followToggleKnob.Parent = followPlayerToggle
+
+local followKnobCorner = Instance.new("UICorner")
+followKnobCorner.CornerRadius = UDim.new(0, 9)
+followKnobCorner.Parent = followToggleKnob
+
+local followPlayerInput = Instance.new("TextBox")
+followPlayerInput.Name = "FollowPlayerInput"
+followPlayerInput.Size = UDim2.new(1, -24, 0, 26)
+followPlayerInput.Position = UDim2.new(0, 12, 0, 32)
+followPlayerInput.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+followPlayerInput.BorderSizePixel = 0
+followPlayerInput.Text = ""
+followPlayerInput.PlaceholderText = "Click on Player..."
+followPlayerInput.TextColor3 = Color3.fromRGB(200, 200, 210)
+followPlayerInput.PlaceholderColor3 = Color3.fromRGB(120, 120, 140)
+followPlayerInput.TextSize = 12
+followPlayerInput.Font = Enum.Font.Gotham
+followPlayerInput.TextXAlignment = Enum.TextXAlignment.Left
+followPlayerInput.Parent = followPlayerFrame
+
+local followInputCorner = Instance.new("UICorner")
+followInputCorner.CornerRadius = UDim.new(0, 6)
+followInputCorner.Parent = followPlayerInput
+
+local followPlayerStatus = Instance.new("TextLabel")
+followPlayerStatus.Name = "FollowPlayerStatus"
+followPlayerStatus.Size = UDim2.new(1, -24, 0, 12)
+followPlayerStatus.Position = UDim2.new(0, 12, 0, 65)
+followPlayerStatus.BackgroundTransparency = 1
+followPlayerStatus.Text = "Click any player to select"
+followPlayerStatus.TextColor3 = Color3.fromRGB(120, 120, 140)
+followPlayerStatus.TextSize = 10
+followPlayerStatus.Font = Enum.Font.Gotham
+followPlayerStatus.TextXAlignment = Enum.TextXAlignment.Left
+followPlayerStatus.Parent = followPlayerFrame
+
+-- Credits Label
+local creditsLabel = Instance.new("TextLabel")
+creditsLabel.Name = "CreditsLabel"
+creditsLabel.Size = UDim2.new(1, 0, 0, 20)
+creditsLabel.Position = UDim2.new(0, 0, 1, -20)
+creditsLabel.BackgroundTransparency = 1
+creditsLabel.Text = "made by massivendurchfall"
+creditsLabel.TextColor3 = Color3.fromRGB(80, 80, 100)
+creditsLabel.TextSize = 10
+creditsLabel.Font = Enum.Font.Gotham
+creditsLabel.TextXAlignment = Enum.TextXAlignment.Center
+creditsLabel.Parent = mainFrame
+
+-- Variables
+local infJumpEnabled = false
+local noclipEnabled = false
+local walkSpeedEnabled = false
+local currentWalkSpeed = 25
+local followPlayerEnabled = false
+local targetPlayer = nil
+local espEnabled = false
+local connections = {}
+local espHighlights = {}
+
+-- Functions
+local function updateToggleAppearance(toggle, knob, enabled)
+    local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+    
+    if enabled then
+        toggle.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
+        knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        TweenService:Create(knob, tweenInfo, {Position = UDim2.new(1, -21, 0.5, -9)}):Play()
+    else
+        toggle.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+        knob.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
+        TweenService:Create(knob, tweenInfo, {Position = UDim2.new(0, 3, 0.5, -9)}):Play()
     end
-    return nil, err
 end
 
-local function validateLicense(key)
-    -- POST
-    local r = httpReqJson(API_BASE.."/validate.php","POST",{license_key=key,roblox_user_id=USER_ID})
-    if r and r.status>=200 and r.json and r.json.ok then return true,"valid" end
-    -- GET fallback
-    local url = ("%s/validate.php?license_key=%s&roblox_user_id=%d"):format(API_BASE, urlEncode(key), USER_ID)
-    r = httpReqJson(url,"GET")
-    if r and r.status>=200 and r.json and r.json.ok then return true,"valid" end
-    local err = (r and r.json and r.json.error) or (r and ("http_"..r.status)) or "network_error"
-    if r and r.status==200 and (not r.json or (not r.json.ok and not r.json.error)) then
-        err = "http_200 body_snip="..string.sub(r.body or "",1,120)
-    end
-    return false, err
-end
-
--- ---------- Key cache ----------
-local function loadCachedKey()
-    if type(G.LICENSE_KEY)=="string" and #G.LICENSE_KEY>0 then return G.LICENSE_KEY end
-    if CAN_FS and isfile(SAVE_FILENAME) then
-        local ok, content = pcall(readfile, SAVE_FILENAME)
-        if ok and type(content)=="string" and #content>0 then return (content:gsub("%s+$","")) end
+local function findPlayerByName(name)
+    for _, p in pairs(Players:GetPlayers()) do
+        if p.Name:lower():find(name:lower()) or p.DisplayName:lower():find(name:lower()) then
+            return p
+        end
     end
     return nil
 end
-local function saveCachedKey(k) G.LICENSE_KEY=k; if CAN_FS then pcall(writefile, SAVE_FILENAME, k) end end
 
--- ---------- UI (CLEAN LAYOUT) ----------
-local function createUI()
-    local g=Instance.new("ScreenGui")
-    g.Name="BananaKeyGate"
-    g.ResetOnSpawn=false
-    if syn and syn.protect_gui then pcall(syn.protect_gui,g) end
-    g.Parent=game.CoreGui
-
-    -- Root frame (auto height), padded & stacked
-    local f=Instance.new("Frame")
-    f.Size=UDim2.new(0,560,0,0)                 -- width fixed, height auto
-    f.AutomaticSize=Enum.AutomaticSize.Y
-    f.Position=UDim2.new(0.5,-280,0.5,-150)
-    f.BackgroundColor3=Color3.fromRGB(20,20,20)
-    f.Active=true; f.Draggable=true; f.Parent=g
-    Instance.new("UICorner",f).CornerRadius=UDim.new(0,12)
+-- Verbesserte ESP-Funktionen mit direkten Character-Highlights
+local function createChamsBox(character)
+    if not character or character:FindFirstChild("ESP_Highlight") then return end
     
-        -- Close Button
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0,28,0,28)
-    closeBtn.Position = UDim2.new(1,-32,0,4) -- oben rechts
-    closeBtn.AnchorPoint = Vector2.new(0,0)
-    closeBtn.Text = "X"
-    closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 14
-    closeBtn.Parent = f
-    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(1,0)
+    -- Erstelle das Highlight direkt für den ganzen Character
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "ESP_Highlight"
+    highlight.Adornee = character
+    highlight.FillColor = Color3.fromRGB(255, 100, 100) -- Rot
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255) -- Weiß
+    highlight.FillTransparency = 0.4
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = character
     
-    closeBtn.MouseButton1Click:Connect(function()
-        if g then g:Destroy() end
-    end)
+    table.insert(espHighlights, highlight)
+    
+    return highlight
+end
 
-    local pad=Instance.new("UIPadding")
-    pad.PaddingTop=UDim.new(0,12); pad.PaddingBottom=UDim.new(0,12)
-    pad.PaddingLeft=UDim.new(0,12); pad.PaddingRight=UDim.new(0,12)
-    pad.Parent=f
+local function createSelectionBox(character)
+    if not character or character:FindFirstChild("ESP_SelectionBox") then return end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return end
+    
+    -- Erstelle SelectionBox für scharfe Kanten
+    local selectionBox = Instance.new("SelectionBox")
+    selectionBox.Name = "ESP_SelectionBox"
+    selectionBox.Adornee = humanoidRootPart
+    selectionBox.Color3 = Color3.fromRGB(0, 255, 255) -- Cyan
+    selectionBox.LineThickness = 0.15
+    selectionBox.Transparency = 0
+    selectionBox.Parent = workspace -- Parent zu workspace für bessere Sichtbarkeit
+    
+    table.insert(espHighlights, selectionBox)
+    
+    return selectionBox
+end
 
-    local list=Instance.new("UIListLayout")
-    list.FillDirection=Enum.FillDirection.Vertical
-    list.SortOrder=Enum.SortOrder.LayoutOrder
-    list.Padding=UDim.new(0,10)
-    list.Parent=f
-
-    -- Title
-    local title=Instance.new("TextLabel")
-    title.LayoutOrder=1
-    title.Size=UDim2.new(1,0,0,28)
-    title.Text="Banana Eats — License Check"
-    title.TextColor3=Color3.new(1,1,1)
-    title.BackgroundTransparency=1
-    title.TextXAlignment=Enum.TextXAlignment.Left
-    title.Font=Enum.Font.GothamBold
-    title.TextSize=20
-    title.Parent=f
-
-    -- Status
-    local status=Instance.new("TextLabel")
-    status.LayoutOrder=2
-    status.Size=UDim2.new(1,0,0,20)
-    status.Text=(REQ and "Paste your license key OR your Work.ink token below.") or "Your executor blocks HTTP (syn.request/http_request missing)."
-    status.TextColor3=Color3.fromRGB(200,200,200)
-    status.BackgroundTransparency=1
-    status.TextXAlignment=Enum.TextXAlignment.Left
-    status.Font=Enum.Font.Gotham
-    status.TextSize=14
-    status.Name="Status"
-    status.Parent=f
-
-    -- Help panel
-    local helpFrame=Instance.new("Frame")
-    helpFrame.LayoutOrder=3
-    helpFrame.Size=UDim2.new(1,0,0,0)
-    helpFrame.AutomaticSize=Enum.AutomaticSize.Y
-    helpFrame.BackgroundColor3=Color3.fromRGB(28,28,28)
-    helpFrame.Parent=f
-    Instance.new("UICorner",helpFrame).CornerRadius=UDim.new(0,8)
-
-    local helpPad=Instance.new("UIPadding")
-    helpPad.PaddingTop=UDim.new(0,10); helpPad.PaddingBottom=UDim.new(0,10)
-    helpPad.PaddingLeft=UDim.new(0,10); helpPad.PaddingRight=UDim.new(0,10)
-    helpPad.Parent=helpFrame
-
-    local help=Instance.new("TextLabel")
-    help.Size=UDim2.new(1,0,0,0)
-    help.AutomaticSize=Enum.AutomaticSize.Y
-    help.TextWrapped=true
-    help.RichText=true
-    help.TextXAlignment=Enum.TextXAlignment.Left
-    help.TextYAlignment=Enum.TextYAlignment.Top
-    help.TextColor3=Color3.fromRGB(220,220,220)
-    help.Font=Enum.Font.Gotham
-    help.TextSize=13
-    help.Parent=helpFrame
-    help.Text = table.concat({
-        "How to get the key:",
-        "\n1) Click <b>Copy Work.ink Link</b>.",
-        "\n2) Open your browser and paste (Ctrl+V / long-press → Paste) into the address bar.",
-        "\n3) Complete the steps on Work.ink until you see a <b>token</b> or key.",
-        "\n4) Copy that <b>token/key</b> and paste it below.",
-        "\n5) Press <b>Continue</b>. The loader will redeem/validate automatically."
-    },"")
-
-    -- Input
-    local box=Instance.new("TextBox")
-    box.LayoutOrder=4
-    box.Size=UDim2.new(1,0,0,36)
-    box.PlaceholderText="Paste license key OR Work.ink token here"
-    box.Text=""
-    box.TextColor3=Color3.new(1,1,1)
-    box.BackgroundColor3=Color3.fromRGB(35,35,35)
-    box.ClearTextOnFocus=false
-    box.Font=Enum.Font.Gotham
-    box.TextSize=14
-    Instance.new("UICorner",box).CornerRadius=UDim.new(0,8)
-    box.Parent=f
-
-    -- Buttons row
-    local btnRow=Instance.new("Frame")
-    btnRow.LayoutOrder=5
-    btnRow.Size=UDim2.new(1,0,0,36)
-    btnRow.BackgroundTransparency=1
-    btnRow.Parent=f
-
-    local btnList=Instance.new("UIListLayout")
-    btnList.FillDirection=Enum.FillDirection.Horizontal
-    btnList.HorizontalAlignment=Enum.HorizontalAlignment.Left
-    btnList.VerticalAlignment=Enum.VerticalAlignment.Center
-    btnList.Padding=UDim.new(0,10)
-    btnList.Parent=btnRow
-
-    local go=Instance.new("TextButton")
-    go.Size=UDim2.new(0.45,0,1,0)
-    go.Text="Continue"
-    go.TextColor3=Color3.new(1,1,1)
-    go.BackgroundColor3=Color3.fromRGB(40,100,220)
-    go.Font=Enum.Font.GothamBold
-    go.TextSize=14
-    Instance.new("UICorner",go).CornerRadius=UDim.new(0,8)
-    go.Parent=btnRow
-
-    local clip=Instance.new("TextButton")
-    clip.Size=UDim2.new(0.45,0,1,0)
-    clip.Text="Paste from Clipboard"
-    clip.TextColor3=Color3.new(1,1,1)
-    clip.BackgroundColor3=Color3.fromRGB(60,60,60)
-    clip.Font=Enum.Font.Gotham
-    clip.TextSize=14
-    Instance.new("UICorner",clip).CornerRadius=UDim.new(0,8)
-    clip.Parent=btnRow
-
-    -- Copy Work.ink link (separate row, never overlaps)
-    local copyLink=Instance.new("TextButton")
-    copyLink.LayoutOrder=6
-    copyLink.Size=UDim2.new(1,0,0,30)
-    copyLink.Text="➡ Copy Work.ink link (paste it into your browser):  "..WORKINK_LINK
-    copyLink.TextColor3=Color3.fromRGB(220,220,220)
-    copyLink.BackgroundColor3=Color3.fromRGB(45,45,45)
-    copyLink.TextXAlignment=Enum.TextXAlignment.Left
-    copyLink.Font=Enum.Font.Gotham
-    copyLink.TextSize=12
-    Instance.new("UICorner",copyLink).CornerRadius=UDim.new(0,6)
-    copyLink.Parent=f
-
-    copyLink.MouseButton1Click:Connect(function()
-        if typeof(setclipboard)=="function" then
-            pcall(setclipboard, WORKINK_LINK)
-            status.Text="Link copied. Open your browser, paste (Ctrl+V), finish steps, then copy the token."
-        else
-            status.Text="Cannot copy automatically. Manually copy this link: "..WORKINK_LINK
+local function addESPToPlayer(targetPlayer)
+    if not targetPlayer or not targetPlayer.Character then 
+        print("Kein Character für ESP:", targetPlayer and targetPlayer.Name or "unbekannt")
+        return 
+    end
+    
+    local character = targetPlayer.Character
+    local humanoid = character:FindFirstChild("Humanoid")
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    
+    if not humanoidRootPart then 
+        print("Kein HumanoidRootPart für:", targetPlayer.Name)
+        return 
+    end
+    
+    -- Prüfe ob bereits ESP vorhanden ist
+    if character:FindFirstChild("ESP_Highlight") then 
+        print("ESP bereits vorhanden für:", targetPlayer.Name)
+        return 
+    end
+    
+    print("Erstelle ESP für:", targetPlayer.Name)
+    
+    -- Erstelle Chams Highlight (Hauptfeature)
+    createChamsBox(character)
+    
+    -- Erstelle zusätzliche SelectionBox für bessere Sichtbarkeit
+    createSelectionBox(character)
+    
+    -- Erstelle Namensschild
+    local head = character:FindFirstChild("Head")
+    if head then
+        local existingGui = head:FindFirstChild("ESP_NameGui")
+        if not existingGui then
+            local billboardGui = Instance.new("BillboardGui")
+            billboardGui.Name = "ESP_NameGui"
+            billboardGui.Adornee = head
+            billboardGui.Size = UDim2.new(0, 200, 0, 30)
+            billboardGui.StudsOffset = Vector3.new(0, 2, 0)
+            billboardGui.AlwaysOnTop = true
+            billboardGui.Parent = workspace -- Parent zu workspace für bessere Sichtbarkeit
+            
+            local nameLabel = Instance.new("TextLabel")
+            nameLabel.Size = UDim2.new(1, 0, 1, 0)
+            nameLabel.BackgroundTransparency = 1
+            nameLabel.Text = targetPlayer.Name
+            nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            nameLabel.TextSize = 12
+            nameLabel.Font = Enum.Font.GothamBold
+            nameLabel.TextStrokeTransparency = 0
+            nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+            nameLabel.TextYAlignment = Enum.TextYAlignment.Center
+            nameLabel.Parent = billboardGui
+            
+            table.insert(espHighlights, billboardGui)
         end
-    end)
-
-    clip.MouseButton1Click:Connect(function()
-        if typeof(getclipboard)=="function" then
-            local ok,v=pcall(getclipboard)
-            if ok and type(v)=="string" and #v>0 then
-                box.Text=v; status.Text="Pasted from clipboard."
+    end
+    
+    -- Erstelle Distanz-Label
+    if humanoidRootPart then
+        local distanceGui = Instance.new("BillboardGui")
+        distanceGui.Name = "ESP_DistanceGui"
+        distanceGui.Adornee = humanoidRootPart
+        distanceGui.Size = UDim2.new(0, 100, 0, 20)
+        distanceGui.StudsOffset = Vector3.new(0, -3, 0)
+        distanceGui.AlwaysOnTop = true
+        distanceGui.Parent = workspace -- Parent zu workspace für bessere Sichtbarkeit
+        
+        local distanceLabel = Instance.new("TextLabel")
+        distanceLabel.Size = UDim2.new(1, 0, 1, 0)
+        distanceLabel.BackgroundTransparency = 1
+        distanceLabel.Text = "0m"
+        distanceLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+        distanceLabel.TextSize = 10
+        distanceLabel.Font = Enum.Font.GothamBold
+        distanceLabel.TextStrokeTransparency = 0
+        distanceLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        distanceLabel.Parent = distanceGui
+        
+        -- Distanz Update
+        local distanceConnection
+        distanceConnection = RunService.Heartbeat:Connect(function()
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and 
+               character.Parent and humanoidRootPart.Parent then
+                
+                local distance = (player.Character.HumanoidRootPart.Position - humanoidRootPart.Position).Magnitude
+                distanceLabel.Text = math.floor(distance) .. "m"
             else
-                status.Text="Clipboard is empty."
+                distanceConnection:Disconnect()
+                if distanceGui.Parent then
+                    distanceGui:Destroy()
+                end
             end
-        else
-            status.Text="Your executor does not support getclipboard(). Paste manually."
-        end
-    end)
-
-    return g,status,box,go
+        end)
+        
+        table.insert(espHighlights, distanceGui)
+    end
+    
+    print("ESP erfolgreich erstellt für:", targetPlayer.Name)
 end
 
-local Gui, Status, InputBox, ContinueBtn = createUI()
-if not REQ then
-    warn("[BananaEats] No HTTP function available (syn.request/http_request/request).")
+local function removeAllESP()
+    -- Disconnect alle bestehenden Connections
+    for _, highlight in pairs(espHighlights) do
+        if highlight and highlight.Parent then
+            highlight:Destroy()
+        end
+    end
+    espHighlights = {}
+    
+    -- Entferne alle ESP-Elemente von allen Spielern
+    for _, p in pairs(Players:GetPlayers()) do
+        if p.Character then
+            -- Entferne Character ESP Elements
+            local elementsToRemove = {"ESP_Highlight", "ESP_SelectionBox"}
+            for _, elementName in pairs(elementsToRemove) do
+                local element = p.Character:FindFirstChild(elementName)
+                if element then
+                    element:Destroy()
+                end
+            end
+        end
+    end
+    
+    -- Entferne alle ESP GUIs aus workspace
+    for _, obj in pairs(workspace:GetChildren()) do
+        if obj.Name == "ESP_NameGui" or obj.Name == "ESP_DistanceGui" or obj.Name == "ESP_SelectionBox" then
+            obj:Destroy()
+        end
+    end
+    
+    -- Entferne alle Highlights aus workspace
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj.Name == "ESP_Highlight" and obj:IsA("Highlight") then
+            obj:Destroy()
+        end
+    end
 end
 
--- Auto-validate cached key
-task.spawn(function()
-    local ex = loadCachedKey()
-    if ex then
-        Status.Text="Checking saved license key..."
-        local ok, reason = validateLicense(ex)
-        if ok then
-            Status.Text="License valid. Loading main script..."
-            saveCachedKey(ex); task.wait(0.3); if Gui then Gui:Destroy() end
-            local ok2,err2=pcall(function() loadstring(game:HttpGet(MAIN_SCRIPT_URL,true))() end)
-            if not ok2 then warn("Main script error: ",err2) end
-        else
-            Status.Text="Saved key invalid: "..tostring(reason)
-        end
-    end
-end)
-
-ContinueBtn.MouseButton1Click:Connect(function()
-    local text = (InputBox.Text or ""):gsub("^%s+",""):gsub("%s+$","")
-    if text=="" then Status.Text="Input is empty. Paste your key or token first."; return end
-
-    if not REQ then
-        Status.Text="Cannot contact server (no HTTP). Try a different executor."
-        return
-    end
-
-    -- 1) Try redeem (token)
-    Status.Text = "Redeeming your token on the server..."
-    local lic, err = redeemToken(text)
-    if lic then
-        InputBox.Text = lic
-        Status.Text = "Your license key: "..lic
-        if typeof(setclipboard)=="function" then pcall(setclipboard, lic); Status.Text="Your license key: "..lic.." (copied)" end
-        saveCachedKey(lic); task.wait(0.6)
-        Status.Text="Validating license..."
-        local ok, reason = validateLicense(lic)
-        if ok then
-            Status.Text="License valid. Loading main script..."
-            task.wait(0.3); if Gui then Gui:Destroy() end
-            local ok2,err2=pcall(function() loadstring(game:HttpGet(MAIN_SCRIPT_URL,true))() end)
-            if not ok2 then warn("Main script error: ",err2) end
-        else
-            Status.Text="Validation failed after redeem: "..tostring(reason)
-        end
-        return
-    end
-
-    -- 2) If redeem says token issue -> treat as key
-    if tostring(err):find("token_invalid") or tostring(err):find("bad_request_no_token") then
-        Status.Text = "Redeem says '"..tostring(err).."'. Trying as license key..."
-        local ok, reason = validateLicense(text)
-        if ok then
-            saveCachedKey(text)
-            Status.Text="License valid. Loading main script..."
-            task.wait(0.3); if Gui then Gui:Destroy() end
-            local ok2,err2=pcall(function() loadstring(game:HttpGet(MAIN_SCRIPT_URL,true))() end)
-            if not ok2 then warn("Main script error: ",err2) end
-        else
-            Status.Text="License invalid: "..tostring(reason)
+local function toggleESP()
+    espEnabled = not espEnabled
+    updateToggleAppearance(espToggle, espKnob, espEnabled)
+    
+    if espEnabled then
+        print("ESP aktiviert - Füge ESP zu allen Spielern hinzu")
+        -- Sofort ESP zu allen existierenden Spielern hinzufügen
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= player then
+                print("Versuche ESP für Spieler:", p.Name)
+                if p.Character then
+                    print("Character gefunden für:", p.Name)
+                    addESPToPlayer(p)
+                else
+                    print("Kein Character für:", p.Name)
+                    -- Warte auf Character wenn noch nicht geladen
+                    spawn(function()
+                        p.CharacterAdded:Wait()
+                        wait(0.5) -- Kurz warten bis Character vollständig geladen
+                        if espEnabled then
+                            print("Character geladen für:", p.Name, "- Füge ESP hinzu")
+                            addESPToPlayer(p)
+                        end
+                    end)
+                end
+            end
         end
     else
-        Status.Text = "Redeem failed: "..tostring(err)..". If you used a token, re-check the browser steps."
-        warn("[BananaEats] Redeem error: "..tostring(err))
+        removeAllESP()
+        print("ESP deaktiviert")
+    end
+end
+
+local function setupInfJump()
+    if infJumpEnabled then
+        connections.infJump = UserInputService.JumpRequest:Connect(function()
+            local character = player.Character
+            if character and character:FindFirstChild("Humanoid") then
+                character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end)
+    else
+        if connections.infJump then
+            connections.infJump:Disconnect()
+            connections.infJump = nil
+        end
+    end
+end
+
+local function setupWalkSpeed()
+    if connections.walkSpeed then
+        connections.walkSpeed:Disconnect()
+    end
+    
+    connections.walkSpeed = RunService.Heartbeat:Connect(function()
+        local character = player.Character
+        if character and character:FindFirstChild("Humanoid") then
+            character.Humanoid.WalkSpeed = currentWalkSpeed
+        end
+    end)
+end
+
+local function setupNoclip()
+    if noclipEnabled then
+        connections.noclip = RunService.Stepped:Connect(function()
+            local character = player.Character
+            if character then
+                for _, descendant in pairs(character:GetDescendants()) do
+                    if descendant:IsA("BasePart") then
+                        descendant.CanCollide = false
+                    end
+                end
+            end
+        end)
+    else
+        if connections.noclip then
+            connections.noclip:Disconnect()
+            connections.noclip = nil
+        end
+        
+        local character = player.Character
+        if character then
+            for _, descendant in pairs(character:GetDescendants()) do
+                if descendant:IsA("BasePart") then
+                    if descendant.Name == "HumanoidRootPart" then
+                        descendant.CanCollide = false
+                    else
+                        descendant.CanCollide = true
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function setupFollowPlayer()
+    if followPlayerEnabled and targetPlayer then
+        connections.followPlayer = RunService.Heartbeat:Connect(function()
+            local myCharacter = player.Character
+            local targetCharacter = targetPlayer.Character
+            
+            if myCharacter and targetCharacter and 
+               myCharacter:FindFirstChild("HumanoidRootPart") and 
+               targetCharacter:FindFirstChild("HumanoidRootPart") then
+                
+                local targetPosition = targetCharacter.HumanoidRootPart.Position
+                local targetLookDirection = targetCharacter.HumanoidRootPart.CFrame.LookVector
+                local behindPosition = targetPosition - (targetLookDirection * 2)
+                
+                myCharacter.HumanoidRootPart.CFrame = CFrame.new(behindPosition, targetPosition)
+            end
+        end)
+        followPlayerStatus.Text = "Following " .. targetPlayer.DisplayName
+    else
+        if connections.followPlayer then
+            connections.followPlayer:Disconnect()
+            connections.followPlayer = nil
+        end
+        followPlayerStatus.Text = "Click any player to select"
+    end
+end
+
+-- Player Click Detection
+local clickToSelectEnabled = true
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and not gameProcessed and clickToSelectEnabled then
+        local mouse = player:GetMouse()
+        if not mouse then return end
+        
+        local target = mouse.Target
+        if target then
+            local clickedPlayer = nil
+            local parent = target.Parent
+            
+            while parent and parent ~= workspace do
+                if parent:FindFirstChild("Humanoid") and parent:FindFirstChild("Head") then
+                    clickedPlayer = Players:GetPlayerFromCharacter(parent)
+                    break
+                end
+                parent = parent.Parent
+            end
+            
+            if clickedPlayer and clickedPlayer ~= player then
+                followPlayerInput.Text = clickedPlayer.Name
+                followPlayerStatus.Text = "Selected: " .. clickedPlayer.DisplayName
+                print("Selected player:", clickedPlayer.Name)
+                
+                local character = clickedPlayer.Character
+                if character and character:FindFirstChild("Head") then
+                    local head = character.Head
+                    local selectionBox = Instance.new("SelectionBox")
+                    selectionBox.Adornee = head
+                    selectionBox.Color3 = Color3.fromRGB(0, 255, 0)
+                    selectionBox.LineThickness = 0.2
+                    selectionBox.Transparency = 0.5
+                    selectionBox.Parent = head
+                    
+                    game:GetService("Debris"):AddItem(selectionBox, 1)
+                end
+            end
+        end
     end
 end)
+
+-- Event Connections
+espToggle.MouseButton1Click:Connect(function()
+    toggleESP()
+    print("ESP:", espEnabled)
+end)
+
+infJumpToggle.MouseButton1Click:Connect(function()
+    infJumpEnabled = not infJumpEnabled
+    updateToggleAppearance(infJumpToggle, infJumpKnob, infJumpEnabled)
+    setupInfJump()
+    print("Inf Jump:", infJumpEnabled)
+end)
+
+noclipToggle.MouseButton1Click:Connect(function()
+    noclipEnabled = not noclipEnabled
+    updateToggleAppearance(noclipToggle, noclipKnob, noclipEnabled)
+    setupNoclip()
+    print("Noclip:", noclipEnabled)
+end)
+
+followPlayerToggle.MouseButton1Click:Connect(function()
+    followPlayerEnabled = not followPlayerEnabled
+    updateToggleAppearance(followPlayerToggle, followToggleKnob, followPlayerEnabled)
+    
+    if followPlayerEnabled then
+        local username = followPlayerInput.Text
+        if username == "" then
+            followPlayerEnabled = false
+            updateToggleAppearance(followPlayerToggle, followToggleKnob, false)
+            followPlayerStatus.Text = "No player selected"
+            return
+        end
+        
+        targetPlayer = findPlayerByName(username)
+        if not targetPlayer then
+            followPlayerEnabled = false
+            updateToggleAppearance(followPlayerToggle, followToggleKnob, false)
+            followPlayerStatus.Text = "Player not found"
+            return
+        end
+    else
+        targetPlayer = nil
+    end
+    
+    setupFollowPlayer()
+    print("Follow Player:", followPlayerEnabled)
+end)
+
+redLightButton.MouseButton1Click:Connect(function()
+    local character = player.Character
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        character.HumanoidRootPart.CFrame = CFrame.new(Vector3.new(-49.88, 1023.10, 83.59))
+        print("Teleported to RedLight GreenLight area")
+    end
+end)
+
+teleportButton.MouseButton1Click:Connect(function()
+    local character = player.Character
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        character.HumanoidRootPart.CFrame = CFrame.new(Vector3.new(-215.15, 520.73, -1534.37))
+        print("Teleported to Glass Game finish")
+    end
+end)
+
+-- Slider functionality
+local dragging = false
+
+walkSpeedKnob.MouseButton1Down:Connect(function()
+    dragging = true
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local mouse = player:GetMouse()
+        local mousePos = Vector2.new(mouse.X, mouse.Y)
+        local sliderPos = walkSpeedSlider.AbsolutePosition
+        local sliderSize = walkSpeedSlider.AbsoluteSize
+        
+        local relativeX = mousePos.X - sliderPos.X
+        local clampedX = math.max(0, math.min(relativeX, sliderSize.X))
+        local percentage = clampedX / sliderSize.X
+        
+        walkSpeedKnob.Position = UDim2.new(percentage, -8, 0.5, -8)
+        
+        currentWalkSpeed = math.floor(16 + (percentage * 84))
+        walkSpeedValue.Text = tostring(currentWalkSpeed)
+        
+        print("Walk Speed:", currentWalkSpeed)
+    end
+end)
+
+-- Toggle GUI visibility with hotkey
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == settings.toggleKey then
+        screenGui.Enabled = not screenGui.Enabled
+    end
+end)
+
+-- Button hover effects
+closeButton.MouseEnter:Connect(function()
+    closeButton.BackgroundColor3 = Color3.fromRGB(220, 53, 69)
+end)
+
+closeButton.MouseLeave:Connect(function()
+    closeButton.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+end)
+
+redLightButton.MouseEnter:Connect(function()
+    redLightButton.BackgroundColor3 = Color3.fromRGB(90, 150, 255)
+end)
+
+redLightButton.MouseLeave:Connect(function()
+    redLightButton.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
+end)
+
+teleportButton.MouseEnter:Connect(function()
+    teleportButton.BackgroundColor3 = Color3.fromRGB(90, 150, 255)
+end)
+
+teleportButton.MouseLeave:Connect(function()
+    teleportButton.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
+end)
+
+closeButton.MouseButton1Click:Connect(function()
+    for _, connection in pairs(connections) do
+        if connection then
+            connection:Disconnect()
+        end
+    end
+    
+    removeAllESP()
+    
+    if noclipEnabled then
+        local character = player.Character
+        if character then
+            for _, part in pairs(character:GetChildren()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                    part.CanCollide = true
+                end
+            end
+        end
+    end
+    
+    screenGui:Destroy()
+end)
+
+-- Player events - Verbesserte ESP-Behandlung
+Players.PlayerAdded:Connect(function(newPlayer)
+    print("Neuer Spieler beigetreten:", newPlayer.Name)
+    if espEnabled then
+        newPlayer.CharacterAdded:Connect(function(character)
+            print("Character geladen für neuen Spieler:", newPlayer.Name)
+            wait(0.5) -- Warte bis Charakter vollständig geladen ist
+            if espEnabled then
+                addESPToPlayer(newPlayer)
+            end
+        end)
+        
+        if newPlayer.Character then
+            print("Character bereits vorhanden für:", newPlayer.Name)
+            wait(0.5)
+            if espEnabled then
+                addESPToPlayer(newPlayer)
+            end
+        end
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(removedPlayer)
+    if targetPlayer == removedPlayer then
+        targetPlayer = nil
+        if followPlayerEnabled then
+            followPlayerEnabled = false
+            updateToggleAppearance(followPlayerToggle, followToggleKnob, false)
+            setupFollowPlayer()
+        end
+    end
+end)
+
+-- Character respawn handling
+player.CharacterAdded:Connect(function(character)
+    wait(1)
+    
+    setupWalkSpeed()
+    
+    if infJumpEnabled then
+        setupInfJump()
+    end
+    
+    if noclipEnabled then
+        setupNoclip()
+    end
+    
+    if followPlayerEnabled then
+        setupFollowPlayer()
+    end
+    
+    -- Re-add ESP to all players when local player respawns
+    if espEnabled then
+        wait(1)
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= player and p.Character then
+                addESPToPlayer(p)
+            end
+        end
+    end
+end)
+
+-- Handle character respawns for ESP
+for _, p in pairs(Players:GetPlayers()) do
+    if p ~= player then
+        print("Stelle CharacterAdded Connection für:", p.Name)
+        p.CharacterAdded:Connect(function(character)
+            if espEnabled then
+                print("Character respawned für:", p.Name)
+                wait(0.5) -- Warte bis Charakter vollständig geladen ist
+                addESPToPlayer(p)
+            end
+        end)
+        
+        -- Add ESP to existing characters
+        if p.Character and espEnabled then
+            print("Füge ESP zu existierendem Character hinzu:", p.Name)
+            spawn(function()
+                wait(0.5)
+                if espEnabled then
+                    addESPToPlayer(p)
+                end
+            end)
+        end
+    end
+end
+
+-- Initialize
+setupWalkSpeed()
+print("INK GAME GUI loaded! Hotkey:", settings.toggleKey.Name)
+print("Simply click on any player to target them!")
+print("Credits: made by massivendurchfall")
