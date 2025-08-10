@@ -1,4 +1,5 @@
 -- BananaEats Loader — redeem-first, uses syn.request/http_request/request (no direct HttpService)
+-- GUI: English-only + explicit instructions how to get the key
 
 -- === CONFIG ===
 local API_BASE        = "https://odd-frog-e89b.dosrobert69.workers.dev/api"
@@ -108,30 +109,81 @@ local function saveCachedKey(k) G.LICENSE_KEY=k; if CAN_FS then pcall(writefile,
 -- ---------- UI ----------
 local function createUI()
     local g=Instance.new("ScreenGui"); g.Name="BananaKeyGate"; g.ResetOnSpawn=false; if syn and syn.protect_gui then pcall(syn.protect_gui,g) end; g.Parent=game.CoreGui
-    local f=Instance.new("Frame"); f.Size=UDim2.new(0,520,0,200); f.Position=UDim2.new(0.5,-260,0.5,-100); f.BackgroundColor3=Color3.fromRGB(20,20,20); f.Active=true; f.Draggable=true; f.Parent=g; Instance.new("UICorner",f).CornerRadius=UDim.new(0,12)
-    local t=Instance.new("TextLabel"); t.Size=UDim2.new(1,-20,0,36); t.Position=UDim2.new(0,10,0,10); t.Text="Banana Eats — License Check"; t.TextColor3=Color3.new(1,1,1); t.BackgroundTransparency=1; t.TextXAlignment=Enum.TextXAlignment.Left; t.Font=Enum.Font.GothamBold; t.TextSize=18; t.Parent=f
-    local s=Instance.new("TextLabel"); s.Size=UDim2.new(1,-20,0,22); s.Position=UDim2.new(0,10,0,46); s.Text=(REQ and "Paste your license key OR Work.ink token (redeem runs first).") or "Executor blocks HTTP (syn.request/http_request missing)."; s.TextColor3=Color3.fromRGB(200,200,200); s.BackgroundTransparency=1; s.TextXAlignment=Enum.TextXAlignment.Left; s.Font=Enum.Font.Gotham; s.TextSize=14; s.Name="Status"; s.Parent=f
-    local box=Instance.new("TextBox"); box.Size=UDim2.new(1,-20,0,34); box.Position=UDim2.new(0,10,0,72); box.PlaceholderText="Key OR Token"; box.Text=""; box.TextColor3=Color3.new(1,1,1); box.BackgroundColor3=Color3.fromRGB(35,35,35); box.ClearTextOnFocus=false; box.Font=Enum.Font.Gotham; box.TextSize=14; Instance.new("UICorner",box).CornerRadius=UDim.new(0,8); box.Parent=f
-    local go=Instance.new("TextButton"); go.Size=UDim2.new(0,180,0,34); go.Position=UDim2.new(0,10,0,114); go.Text="Continue"; go.TextColor3=Color3.new(1,1,1); go.BackgroundColor3=Color3.fromRGB(40,100,220); go.Font=Enum.Font.GothamBold; go.TextSize=14; Instance.new("UICorner",go).CornerRadius=UDim.new(0,8); go.Parent=f
-    local clip=Instance.new("TextButton"); clip.Size=UDim2.new(0,160,0,34); clip.Position=UDim2.new(0,200,0,114); clip.Text="From Clipboard"; clip.TextColor3=Color3.new(1,1,1); clip.BackgroundColor3=Color3.fromRGB(60,60,60); clip.Font=Enum.Font.Gotham; clip.TextSize=14; Instance.new("UICorner",clip).CornerRadius=UDim.new(0,8); clip.Parent=f
-    local link=Instance.new("TextButton"); link.Size=UDim2.new(1,-20,0,26); link.Position=UDim2.new(0,10,1,-34); link.Text="➡ Click to Copy the WorkINK Link to get the Key: "..WORKINK_LINK; link.TextColor3=Color3.fromRGB(220,220,220); link.BackgroundColor3=Color3.fromRGB(45,45,45); link.TextXAlignment=Enum.TextXAlignment.Left; link.Font=Enum.Font.Gotham; link.TextSize=12; Instance.new("UICorner",link).CornerRadius=UDim.new(0,6); link.Parent=f
-    link.MouseButton1Click:Connect(function()
-        if typeof(setclipboard)=="function" then pcall(setclipboard, WORKINK_LINK) end
-        s.Text="Link copied. Complete the ad, then copy the token."
+
+    local f=Instance.new("Frame"); f.Size=UDim2.new(0,560,0,260); f.Position=UDim2.new(0.5,-280,0.5,-130)
+    f.BackgroundColor3=Color3.fromRGB(20,20,20); f.Active=true; f.Draggable=true; f.Parent=g; Instance.new("UICorner",f).CornerRadius=UDim.new(0,12)
+
+    local title=Instance.new("TextLabel"); title.Size=UDim2.new(1,-20,0,36); title.Position=UDim2.new(0,10,0,10)
+    title.Text="Banana Eats — License Check"; title.TextColor3=Color3.new(1,1,1); title.BackgroundTransparency=1
+    title.TextXAlignment=Enum.TextXAlignment.Left; title.Font=Enum.Font.GothamBold; title.TextSize=18; title.Parent=f
+
+    local status=Instance.new("TextLabel"); status.Size=UDim2.new(1,-20,0,22); status.Position=UDim2.new(0,10,0,46)
+    status.Text=(REQ and "Paste your license key OR your Work.ink token below.") or "Your executor blocks HTTP (syn.request/http_request missing)."
+    status.TextColor3=Color3.fromRGB(200,200,200); status.BackgroundTransparency=1; status.TextXAlignment=Enum.TextXAlignment.Left
+    status.Font=Enum.Font.Gotham; status.TextSize=14; status.Name="Status"; status.Parent=f
+
+    -- Instructions box (English-only, explicit steps)
+    local help=Instance.new("TextLabel"); help.Size=UDim2.new(1,-20,0,80); help.Position=UDim2.new(0,10,0,70)
+    help.BackgroundColor3=Color3.fromRGB(28,28,28); help.TextXAlignment=Enum.TextXAlignment.Left; help.TextYAlignment=Enum.TextYAlignment.Top
+    help.TextColor3=Color3.fromRGB(220,220,220); help.Font=Enum.Font.Gotham; help.TextSize=12; help.RichText=true
+    help.Text = table.concat({
+        "How to get the key:",
+        "\n1) Click <b>Copy Work.ink Link</b>.",
+        "\n2) Press <b>Ctrl+V</b> (or long-press → Paste) in your web browser’s address bar.",
+        "\n3) Complete the steps on Work.ink until you see a <b>token</b> or key.",
+        "\n4) Copy that <b>token/key</b> and paste it here.",
+        "\n5) Press <b>Continue</b>. The loader will redeem/validate automatically."
+    },""); help.Parent=f; Instance.new("UICorner",help).CornerRadius=UDim.new(0,8)
+
+    local box=Instance.new("TextBox"); box.Size=UDim2.new(1,-20,0,34); box.Position=UDim2.new(0,10,0,156)
+    box.PlaceholderText="Paste license key OR Work.ink token here"; box.Text=""
+    box.TextColor3=Color3.new(1,1,1); box.BackgroundColor3=Color3.fromRGB(35,35,35); box.ClearTextOnFocus=false
+    box.Font=Enum.Font.Gotham; box.TextSize=14; Instance.new("UICorner",box).CornerRadius=UDim.new(0,8); box.Parent=f
+
+    local go=Instance.new("TextButton"); go.Size=UDim2.new(0,180,0,34); go.Position=UDim2.new(0,10,0,200)
+    go.Text="Continue"; go.TextColor3=Color3.new(1,1,1); go.BackgroundColor3=Color3.fromRGB(40,100,220)
+    go.Font=Enum.Font.GothamBold; go.TextSize=14; Instance.new("UICorner",go).CornerRadius=UDim.new(0,8); go.Parent=f
+
+    local clip=Instance.new("TextButton"); clip.Size=UDim2.new(0,160,0,34); clip.Position=UDim2.new(0,200,0,200)
+    clip.Text="Paste from Clipboard"; clip.TextColor3=Color3.new(1,1,1); clip.BackgroundColor3=Color3.fromRGB(60,60,60)
+    clip.Font=Enum.Font.Gotham; clip.TextSize=14; Instance.new("UICorner",clip).CornerRadius=UDim.new(0,8); clip.Parent=f
+
+    local copyLink=Instance.new("TextButton"); copyLink.Size=UDim2.new(1,-20,0,26); copyLink.Position=UDim2.new(0,10,1,-34)
+    copyLink.Text="➡ Copy Work.ink link (paste it into your browser):  "..WORKINK_LINK
+    copyLink.TextColor3=Color3.fromRGB(220,220,220); copyLink.BackgroundColor3=Color3.fromRGB(45,45,45)
+    copyLink.TextXAlignment=Enum.TextXAlignment.Left; copyLink.Font=Enum.Font.Gotham; copyLink.TextSize=12
+    Instance.new("UICorner",copyLink).CornerRadius=UDim.new(0,6); copyLink.Parent=f
+
+    copyLink.MouseButton1Click:Connect(function()
+        if typeof(setclipboard)=="function" then
+            pcall(setclipboard, WORKINK_LINK)
+            status.Text="Work.ink link copied. Open your browser, paste (Ctrl+V), finish steps, then copy the token."
+        else
+            status.Text="Cannot copy automatically. Manually copy this link: "..WORKINK_LINK
+        end
     end)
+
     clip.MouseButton1Click:Connect(function()
         if typeof(getclipboard)=="function" then
             local ok,v=pcall(getclipboard)
-            if ok and type(v)=="string" and #v>0 then box.Text=v; s.Text="Pasted from clipboard." else s.Text="Clipboard is empty." end
+            if ok and type(v)=="string" and #v>0 then
+                box.Text=v; status.Text="Pasted from clipboard."
+            else
+                status.Text="Clipboard is empty."
+            end
         else
-            s.Text="Executor has no getclipboard()."
+            status.Text="Your executor does not support getclipboard(). Paste manually."
         end
     end)
-    return g,s,box,go
+
+    return g,status,box,go
 end
 
 local Gui, Status, InputBox, ContinueBtn = createUI()
-if not REQ then return end
+if not REQ then
+    -- Still allow manual key entry if executor suddenly exposes request later; otherwise we stop here.
+    warn("[BananaEats] No HTTP function available (syn.request/http_request/request).")
+end
 
 -- Auto-validate cached key
 task.spawn(function()
@@ -141,7 +193,7 @@ task.spawn(function()
         local ok, reason = validateLicense(ex)
         if ok then
             Status.Text="License valid. Loading main script..."
-            saveCachedKey(ex); task.wait(0.3); Gui:Destroy()
+            saveCachedKey(ex); task.wait(0.3); if Gui then Gui:Destroy() end
             local ok2,err2=pcall(function() loadstring(game:HttpGet(MAIN_SCRIPT_URL,true))() end)
             if not ok2 then warn("Main script error: ",err2) end
         else
@@ -152,37 +204,42 @@ end)
 
 ContinueBtn.MouseButton1Click:Connect(function()
     local text = (InputBox.Text or ""):gsub("^%s+",""):gsub("%s+$","")
-    if text=="" then Status.Text="Input is empty." return end
+    if text=="" then Status.Text="Input is empty. Paste your key or token first."; return end
+
+    if not REQ then
+        Status.Text="Cannot contact server (no HTTP). Try a different executor."
+        return
+    end
 
     -- 1) ALWAYS try redeem first (token case)
-    Status.Text = "Redeeming token with server..."
+    Status.Text = "Redeeming your token on the server..."
     local lic, err = redeemToken(text)
     if lic then
         InputBox.Text = lic
         Status.Text = "Your license key: "..lic
         if typeof(setclipboard)=="function" then pcall(setclipboard, lic); Status.Text="Your license key: "..lic.." (copied)" end
-        saveCachedKey(lic); task.wait(0.8)
-        Status.Text="Validating..."
+        saveCachedKey(lic); task.wait(0.6)
+        Status.Text="Validating license..."
         local ok, reason = validateLicense(lic)
         if ok then
             Status.Text="License valid. Loading main script..."
-            task.wait(0.3); Gui:Destroy()
+            task.wait(0.3); if Gui then Gui:Destroy() end
             local ok2,err2=pcall(function() loadstring(game:HttpGet(MAIN_SCRIPT_URL,true))() end)
             if not ok2 then warn("Main script error: ",err2) end
         else
-            Status.Text="Validation after redeem failed: "..tostring(reason)
+            Status.Text="Validation failed after redeem: "..tostring(reason)
         end
         return
     end
 
-    -- 2) If redeem clearly says token issue -> treat as KEY validate
+    -- 2) If redeem says token problem -> treat as KEY validate
     if tostring(err):find("token_invalid") or tostring(err):find("bad_request_no_token") then
         Status.Text = "Redeem says '"..tostring(err).."'. Trying as license key..."
         local ok, reason = validateLicense(text)
         if ok then
             saveCachedKey(text)
             Status.Text="License valid. Loading main script..."
-            task.wait(0.3); Gui:Destroy()
+            task.wait(0.3); if Gui then Gui:Destroy() end
             local ok2,err2=pcall(function() loadstring(game:HttpGet(MAIN_SCRIPT_URL,true))() end)
             if not ok2 then warn("Main script error: ",err2) end
         else
@@ -190,7 +247,7 @@ ContinueBtn.MouseButton1Click:Connect(function()
         end
     else
         -- other errors (e.g. HTML body) -> show raw hint
-        Status.Text = "Redeem failed: "..tostring(err)
+        Status.Text = "Redeem failed: "..tostring(err)..". If you used a token, re-check the browser steps."
         warn("[BananaEats] Redeem error: "..tostring(err))
     end
 end)
