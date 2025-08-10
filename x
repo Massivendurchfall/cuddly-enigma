@@ -1,10 +1,3 @@
--- === Banana Eats Script (lag-fix ESP, mobile-safe) ===
--- by Massivendurchfall + optimiert (Cache + Events, kein Vollscan pro Tick)
--- Update:
--- 1) Auto-Combo-Code im Menü (liest 3 Buttons)
--- 2) Code-Puzzle-ESP-Toggle bleibt erhalten
--- 3) Visuals fix: ursprüngliche Lighting-Werte werden gesichert und 100% wiederhergestellt
-
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
@@ -14,13 +7,11 @@ local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
 local Lighting = game:GetService("Lighting")
-local GuiService = game:GetService("GuiService")
 local TextChatService = game:GetService("TextChatService")
 
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 local isGuiVisible = true
 
--- === Visuals: Originalwerte speichern (Fix) ===
 local initialLighting = {
     Brightness = Lighting.Brightness,
     ClockTime = Lighting.ClockTime,
@@ -59,15 +50,11 @@ local Tabs = {
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
 }
 
--- =======================
--- Helpers
--- =======================
 local function createBillboard(text)
     local billboard = Instance.new("BillboardGui")
     billboard.AlwaysOnTop = true
     billboard.Size = UDim2.new(0, 200, 0, 50)
     billboard.StudsOffset = Vector3.new(0, 3, 0)
-
     local textLabel = Instance.new("TextLabel")
     textLabel.Size = UDim2.new(1, 0, 1, 0)
     textLabel.BackgroundTransparency = 1
@@ -78,7 +65,6 @@ local function createBillboard(text)
     textLabel.TextStrokeTransparency = 0
     textLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
     textLabel.Parent = billboard
-
     return billboard
 end
 
@@ -98,16 +84,12 @@ end
 local function safePrimary(base)
     if base:IsA("Model") and base.PrimaryPart then return base.PrimaryPart end
     if base:IsA("BasePart") then return base end
-    local p = base:FindFirstChildWhichIsA("BasePart", true)
-    return p
+    return base:FindFirstChildWhichIsA("BasePart", true)
 end
 
--- =======================
--- ESP State + Caches
--- =======================
 local cakeEspActive, cakeLoop, cakeConnAdd, cakeConnRem = false, nil, nil, nil
 local cakeEspColor = Color3.fromRGB(255, 255, 0)
-local cakeTargets = {} -- [BasePart]=true
+local cakeTargets = {}
 
 local coinEspActive, coinLoop, coinConnAdd, coinConnRem = false, nil, nil, nil
 local coinEspColor = Color3.fromRGB(0, 255, 0)
@@ -128,13 +110,11 @@ local puzzleNumberEspColor = Color3.fromRGB(255, 255, 255)
 local puzzleNumbers = {["23"]=true, ["34"]=true, ["31"]=true}
 local puzzleNumberTargets = {}
 
--- Code Puzzle: Toggle bleibt, nur Label an Puzzle-Objekt
-local puzzleEspActive = false
+local codePuzzleEspActive = false
 local codePuzzleLabelAttached = false
 local codePuzzleConnAdd = nil
-local puzzleEspColor = Color3.fromRGB(0, 255, 0) -- (aktuell nur Platzhalter für evtl. spätere Nutzung)
+local codePuzzleLabelColor = Color3.fromRGB(0, 255, 0)
 
--- Movement / Utility
 local speedLoop = nil
 local currentSpeed = 16
 
@@ -167,7 +147,6 @@ local function disableAntiAfk()
     if antiAfkConnection then antiAfkConnection:Disconnect(); antiAfkConnection=nil end
 end
 
--- Visual FX
 local ccActive, ccEffect = false, nil
 local ccBrightness, ccContrast, ccSaturation = 0, 0, 1
 local function enableColorCorrection()
@@ -199,9 +178,6 @@ local function disableSunRays()
     if sunRaysEffect then sunRaysEffect:Destroy(); sunRaysEffect=nil end
 end
 
--- =======================
--- Cleanup Helpers
--- =======================
 local function clearAdornment(part, name)
     if part and part:FindFirstChild(name) then part[name]:Destroy() end
 end
@@ -262,15 +238,12 @@ local function removeNametags()
     end
 end
 
--- =======================
--- Target Detection (incremental)
--- =======================
 local function isCakePart(obj)
     if not obj:IsA("BasePart") then return false end
     local p = obj.Parent
     if not p then return false end
-    if (p.Name=="Cake" and tonumber(obj.Name)) then return true end
-    if (p.Name=="CakePlate" and obj.Name=="Plate") then return true end
+    if p.Name=="Cake" and tonumber(obj.Name) then return true end
+    if p.Name=="CakePlate" and obj.Name=="Plate" then return true end
     return false
 end
 
@@ -295,7 +268,6 @@ local function isPuzzleNumber(obj)
     return parent and parent.Name=="Buttons" and puzzleNumbers[obj.Name]==true
 end
 
--- Initial scan helpers
 local function initialScanAndCache(predicate, cacheTable)
     for _, obj in ipairs(workspace:GetDescendants()) do
         if predicate(obj) then
@@ -316,9 +288,6 @@ local function hookWorkspace(predicate, cacheTable, onAddRef, onRemRef)
     return addConn, remConn
 end
 
--- =======================
--- ESP Loops (cache-driven)
--- =======================
 local function cakeEspLoopFunction()
     local waitTime = isMobile and 0.5 or 0.25
     while cakeEspActive do
@@ -406,33 +375,29 @@ local function puzzleNumberEspLoopFunction()
     end
 end
 
--- Code Puzzle: nur TextLabel an erstem passenden Objekt (Toggle bleibt)
+local function findCombinationPuzzlePart()
+    local gk = workspace:FindFirstChild("GameKeeper")
+    if not gk then return nil end
+    local puzzles = gk:FindFirstChild("Puzzles")
+    if not puzzles then return nil end
+    local cp = puzzles:FindFirstChild("CombinationPuzzle")
+    if not cp then return nil end
+    local target = cp.PrimaryPart or cp:FindFirstChildWhichIsA("BasePart", true)
+    return target
+end
+
 local function attachCodePuzzleLabelOnce()
     if codePuzzleLabelAttached then return end
-    local target = nil
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            local fullname = obj:GetFullName():lower()
-            if fullname:find("combinationpuzzle") then
-                target = obj; break
-            end
-        end
-    end
+    local target = findCombinationPuzzlePart()
     if target then
         if not target:FindFirstChild("PuzzleLabel") then
-            local b = createBillboard("Code Puzzle")
+            local b = createBillboard("Combination Puzzle")
             b.Name = "PuzzleLabel"
             b.Parent = target
         end
         codePuzzleLabelAttached = true
     end
 end
-
--- =======================
--- Auto-Combo-Code im Menü (kein Toggle)
--- =======================
-local comboParagraph
-local comboLoop = nil
 
 local function getComboButtonsFolder()
     local gk = workspace:FindFirstChild("GameKeeper")
@@ -467,6 +432,8 @@ local function readCombinationCode()
     return table.concat(out, "")
 end
 
+local comboParagraph
+local comboLoop = nil
 local function startComboWatcher()
     if comboLoop then task.cancel(comboLoop) end
     comboLoop = task.spawn(function()
@@ -481,9 +448,6 @@ local function startComboWatcher()
     end)
 end
 
--- =======================
--- Chams & Nametags (event-driven)
--- =======================
 local function applyChamsToCharacter(plyr)
     if not plyr or not plyr.Character then return end
     local sameTeam = (plyr.TeamColor == Players.LocalPlayer.TeamColor)
@@ -509,8 +473,9 @@ local function applyChamsToCharacter(plyr)
 end
 
 local function applyNametagToCharacter(plyr)
-    if not plyr or not plyr.Character or not plyr.Character:FindChild("Head") then return end
-    local head = plyr.Character.Head
+    if not plyr or not plyr.Character then return end
+    local head = plyr.Character:FindFirstChild("Head")
+    if not head then return end
     if not head:FindFirstChild("Nametag") then
         local b = createBillboard(plyr.Name)
         b.Name = "Nametag"
@@ -538,9 +503,6 @@ local function hookPlayer(plyr)
     end
 end
 
--- =======================
--- Noclip
--- =======================
 local function enableNoclip()
     if noclipActive then return end
     noclipActive = true
@@ -555,7 +517,6 @@ local function enableNoclip()
             end
         end
     end)
-    Fluent:Notify({ Title="Noclip", Content="Noclip enabled", Duration=3 })
 end
 local function disableNoclip()
     if not noclipActive then return end
@@ -565,12 +526,8 @@ local function disableNoclip()
         if part and part.Parent then part.CanCollide = true end
     end
     noclipParts = {}
-    Fluent:Notify({ Title="Noclip", Content="Noclip disabled", Duration=3 })
 end
 
--- =======================
--- Fly
--- =======================
 local function enableFly()
     local character = Players.LocalPlayer.Character
     if character and character:FindFirstChild("HumanoidRootPart") then
@@ -582,14 +539,12 @@ local function enableFly()
         flyBodyGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
         flyBodyGyro.CFrame = root.CFrame
         flyActive = true
-
         if isMobile then
             local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
             local flyGui = Instance.new("ScreenGui")
             flyGui.Name = "FlyControlsGUI"
             flyGui.ResetOnSpawn = false
             flyGui.Parent = playerGui
-
             local function createFlyButton(text, position, size)
                 local button = Instance.new("TextButton")
                 button.Text = text
@@ -605,14 +560,12 @@ local function enableFly()
                 corner.Parent = button
                 return button
             end
-
             local upButton = createFlyButton("↑", UDim2.new(0.5, -40, 0.3, 0), UDim2.new(0, 80, 0, 60))
             local downButton = createFlyButton("↓", UDim2.new(0.5, -40, 0.7, 0), UDim2.new(0, 80, 0, 60))
             local forwardButton = createFlyButton("▲", UDim2.new(0.5, -40, 0.4, 0), UDim2.new(0, 80, 0, 60))
             local backwardButton = createFlyButton("▼", UDim2.new(0.5, -40, 0.6, 0), UDim2.new(0, 80, 0, 60))
             local leftButton = createFlyButton("◄", UDim2.new(0.3, -40, 0.5, 0), UDim2.new(0, 80, 0, 60))
             local rightButton = createFlyButton("►", UDim2.new(0.7, -40, 0.5, 0), UDim2.new(0, 80, 0, 60))
-
             local function setDir(vec)
                 if flyConnection then flyConnection:Disconnect() end
                 flyConnection = RunService.RenderStepped:Connect(function()
@@ -627,7 +580,6 @@ local function enableFly()
                     flyBodyGyro.CFrame = workspace.CurrentCamera.CFrame
                 end)
             end
-
             local function bind(button, vec)
                 button.InputBegan:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.Touch then setDir(vec) end
@@ -636,7 +588,6 @@ local function enableFly()
                     if input.UserInputType == Enum.UserInputType.Touch then clearDir() end
                 end)
             end
-
             bind(forwardButton, workspace.CurrentCamera.CFrame.LookVector)
             bind(backwardButton, -workspace.CurrentCamera.CFrame.LookVector)
             bind(leftButton, -workspace.CurrentCamera.CFrame.RightVector)
@@ -674,9 +625,6 @@ local function disableFly()
     end
 end
 
--- =======================
--- AntiKick
--- =======================
 local function startAntiKick()
     if not antiKickConnection then
         antiKickConnection = Players.LocalPlayer.Idled:Connect(function()
@@ -689,9 +637,6 @@ local function stopAntiKick()
     if antiKickConnection then antiKickConnection:Disconnect(); antiKickConnection=nil end
 end
 
--- =======================
--- Auto Features
--- =======================
 local function autoDeletePeelsFunc()
     while autoDeletePeelsActive do
         pcall(function()
@@ -765,17 +710,15 @@ local function autoKillFunc()
     end
 end
 
--- =======================
--- UI: ESP
--- =======================
 local ESPSection = Tabs.ESP:AddSection("ESP Toggles")
-local ESPColorsSection = Tabs.ESP:AddSection("ESP Colors")
 
--- Auto-Combo-Code Anzeige
 local ComboCodeSection = Tabs.ESP:AddSection("Combination Puzzle")
 local comboUI = ComboCodeSection:AddParagraph({ Title = "Combination Code", Content = "—" })
-comboParagraph = comboUI
+local comboParagraphRef = comboUI
+comboParagraph = comboParagraphRef
 startComboWatcher()
+
+local ESPColorsSection = Tabs.ESP:AddSection("ESP Colors")
 
 ESPSection:AddToggle("CakeEspToggle", {
     Title = "Cake ESP",
@@ -893,24 +836,23 @@ ESPSection:AddToggle("CubePuzzleEspToggle", {
     end
 })
 
--- Code Puzzle ESP Toggle (nur Label; „NoLabel“-Kram existiert nicht mehr)
 ESPSection:AddToggle("CodePuzzleEspToggle", {
     Title = "Code Puzzle (Label)",
     Default = false,
     Callback = function(state)
-        puzzleEspActive = state
+        codePuzzleEspActive = state
         if state then
             codePuzzleLabelAttached = false
             attachCodePuzzleLabelOnce()
             if not codePuzzleConnAdd then
                 codePuzzleConnAdd = workspace.DescendantAdded:Connect(function(obj)
-                    if not puzzleEspActive or codePuzzleLabelAttached then return end
-                    if obj:IsA("BasePart") then
-                        local fullname = obj:GetFullName():lower()
-                        if fullname:find("combinationpuzzle") then
-                            if not obj:FindFirstChild("PuzzleLabel") then
-                                local b = createBillboard("Code Puzzle"); b.Name="PuzzleLabel"; b.Parent=obj
-                            end
+                    if not codePuzzleEspActive or codePuzzleLabelAttached then return end
+                    if obj:IsA("Model") and obj.Name=="CombinationPuzzle" then
+                        local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)
+                        if part and not part:FindFirstChild("PuzzleLabel") then
+                            local b = createBillboard("Combination Puzzle")
+                            b.Name="PuzzleLabel"
+                            b.Parent=part
                             codePuzzleLabelAttached = true
                         end
                     end
@@ -928,7 +870,6 @@ ESPSection:AddToggle("CodePuzzleEspToggle", {
     end
 })
 
--- Farben
 ESPColorsSection:AddColorpicker("CakeEspColor", {
     Title = "Cake ESP",
     Default = cakeEspColor,
@@ -961,13 +902,10 @@ ESPColorsSection:AddColorpicker("PuzzleNumberEspColor", {
 })
 ESPColorsSection:AddColorpicker("PuzzleObjectEspColor", {
     Title = "Code Puzzle (Label)",
-    Default = puzzleEspColor,
-    Callback = function(color) puzzleEspColor = color end
+    Default = codePuzzleLabelColor,
+    Callback = function(color) codePuzzleLabelColor = color end
 })
 
--- =======================
--- Player Tab (inkl. Noclip)
--- =======================
 local PlayerMovementSection = Tabs.Player:AddSection("Movement")
 
 PlayerMovementSection:AddSlider("WalkSpeedSlider", {
@@ -1026,9 +964,6 @@ PlayerUtilitySection:AddToggle("AntiAFKToggle", {
     Callback = function(state) if state then enableAntiAfk() else disableAntiAfk() end end
 })
 
--- =======================
--- Auto Tab
--- =======================
 local AutoSection = Tabs.Auto:AddSection("Auto Features")
 AutoSection:AddToggle("AutoCollectCoins", {
     Title = "Auto Collect Coins",
@@ -1088,9 +1023,6 @@ AutoSection:AddToggle("AntiKickBypass", {
     Callback = function(state) if state then startAntiKick() else stopAntiKick() end end
 })
 
--- =======================
--- Visual Tab (mit Fixes)
--- =======================
 local VisualSection = Tabs.Visual
 VisualSection:AddToggle("FullbrightToggle", {
     Title="Fullbright", Default=false,
@@ -1178,13 +1110,10 @@ UtilitySection:AddButton({
         if noFogLoop then task.cancel(noFogLoop); noFogLoop=nil; noFogActive=false end
         ccActive=false; sunRaysActive=false; fullbrightActive=false
         restoreLighting()
-        Fluent:Notify({ Title="Visual Reset", Content="Lighting zurück auf Spiel-Originalwerte", Duration=3 })
+        Fluent:Notify({ Title="Visual Reset", Content="Lighting restored to original", Duration=3 })
     end
 })
 
--- =======================
--- Save/Interface
--- =======================
 SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
 SaveManager:IgnoreThemeSettings()
@@ -1195,9 +1124,6 @@ InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
--- =======================
--- Mobile GUI Toggle
--- =======================
 local function createMobileGUIButton()
     if not isMobile then return end
     local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
@@ -1205,7 +1131,6 @@ local function createMobileGUIButton()
     mobileGui.Name = "MobileGUIToggle"
     mobileGui.ResetOnSpawn = false
     mobileGui.Parent = playerGui
-
     local toggleButton = Instance.new("TextButton")
     toggleButton.Name = "ToggleButton"
     toggleButton.Text = "🎮"
@@ -1219,14 +1144,12 @@ local function createMobileGUIButton()
     toggleButton.Parent = mobileGui
     local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0,30); corner.Parent = toggleButton
     local stroke = Instance.new("UIStroke"); stroke.Color = Color3.fromRGB(100,100,100); stroke.Thickness = 2; stroke.Parent = toggleButton
-
     toggleButton.MouseButton1Click:Connect(function()
         isGuiVisible = not isGuiVisible
         if Window and Window.Root then Window.Root.Visible = isGuiVisible end
         toggleButton.Text = isGuiVisible and "🎮" or "📱"
         toggleButton.BackgroundColor3 = isGuiVisible and Color3.fromRGB(30,30,30) or Color3.fromRGB(60,60,60)
     end)
-
     local dragging, dragStart, startPos = false, nil, nil
     toggleButton.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.Touch then
@@ -1244,18 +1167,15 @@ local function createMobileGUIButton()
     end)
 end
 
--- =======================
--- Chat Commands
--- =======================
 local function setupChatCommands()
     local function onChatted(message)
         local msg = message:lower()
         if msg == "/gui" or msg == "/menu" or msg == "/toggle" then
             isGuiVisible = not isGuiVisible
             if Window and Window.Root then Window.Root.Visible = isGuiVisible end
-            Fluent:Notify({ Title="GUI Toggle", Content="Menu "..(isGuiVisible and "opened" or "closed").." via chat command", Duration=2 })
+            Fluent:Notify({ Title="GUI Toggle", Content="Menu "..(isGuiVisible and "opened" or "closed"), Duration=2 })
         elseif msg == "/help" then
-            Fluent:Notify({ Title="Chat Commands", Content="/gui, /menu, /toggle - Toggle GUI\n/help - Show this help", Duration=5 })
+            Fluent:Notify({ Title="Chat Commands", Content="/gui, /menu, /toggle\n/help", Duration=5 })
         end
     end
     if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
@@ -1271,9 +1191,6 @@ end
 
 if isMobile then task.wait(2); createMobileGUIButton(); setupChatCommands() else setupChatCommands() end
 
--- =======================
--- Character Respawn Handling
--- =======================
 Players.LocalPlayer.CharacterAdded:Connect(function(character)
     character:WaitForChild("HumanoidRootPart")
     task.wait(0.5)
@@ -1285,9 +1202,8 @@ Players.LocalPlayer.CharacterAdded:Connect(function(character)
     if noclipActive then task.wait(0.5); disableNoclip(); task.wait(0.5); enableNoclip() end
 end)
 
--- Hook existing + future players for ESP features
 Players.PlayerAdded:Connect(function(p) if p ~= Players.LocalPlayer then hookPlayer(p) end end)
 for _, p in ipairs(Players:GetPlayers()) do if p ~= Players.LocalPlayer then hookPlayer(p) end end
 
-Fluent:Notify({ Title="Banana Eats Script", Content="Script loaded successfully!", Duration=4 })
+Fluent:Notify({ Title="Banana Eats Script", Content="Loaded", Duration=4 })
 Window:SelectTab(1)
