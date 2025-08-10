@@ -1,5 +1,9 @@
 -- === Banana Eats Script (lag-fix ESP, mobile-safe) ===
 -- by Massivendurchfall + optimiert (Cache + Events, kein Vollscan pro Tick)
+-- Update:
+-- 1) Auto-Combo-Code im Menü (liest 3 Buttons)
+-- 2) Code-Puzzle-ESP-Toggle bleibt erhalten
+-- 3) Visuals fix: ursprüngliche Lighting-Werte werden gesichert und 100% wiederhergestellt
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
@@ -15,6 +19,27 @@ local TextChatService = game:GetService("TextChatService")
 
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 local isGuiVisible = true
+
+-- === Visuals: Originalwerte speichern (Fix) ===
+local initialLighting = {
+    Brightness = Lighting.Brightness,
+    ClockTime = Lighting.ClockTime,
+    FogStart = Lighting.FogStart,
+    FogEnd = Lighting.FogEnd,
+    GlobalShadows = Lighting.GlobalShadows,
+    OutdoorAmbient = Lighting.OutdoorAmbient,
+    ExposureCompensation = Lighting.ExposureCompensation,
+}
+
+local function restoreLighting()
+    Lighting.Brightness = initialLighting.Brightness
+    Lighting.ClockTime = initialLighting.ClockTime
+    Lighting.FogStart = initialLighting.FogStart
+    Lighting.FogEnd = initialLighting.FogEnd
+    Lighting.GlobalShadows = initialLighting.GlobalShadows
+    Lighting.OutdoorAmbient = initialLighting.OutdoorAmbient
+    Lighting.ExposureCompensation = initialLighting.ExposureCompensation
+end
 
 local Window = Fluent:CreateWindow({
     Title = "Banana Eats Script",
@@ -103,11 +128,11 @@ local puzzleNumberEspColor = Color3.fromRGB(255, 255, 255)
 local puzzleNumbers = {["23"]=true, ["34"]=true, ["31"]=true}
 local puzzleNumberTargets = {}
 
--- Code Puzzle: nur Textlabel an einem Objekt (kein Box-ESP, kein Loop)
+-- Code Puzzle: Toggle bleibt, nur Label an Puzzle-Objekt
 local puzzleEspActive = false
 local codePuzzleLabelAttached = false
 local codePuzzleConnAdd = nil
-local puzzleEspColor = Color3.fromRGB(0, 255, 0) -- nur für evtl. zukünftige Nutzung
+local puzzleEspColor = Color3.fromRGB(0, 255, 0) -- (aktuell nur Platzhalter für evtl. spätere Nutzung)
 
 -- Movement / Utility
 local speedLoop = nil
@@ -381,7 +406,7 @@ local function puzzleNumberEspLoopFunction()
     end
 end
 
--- Code Puzzle: nur TextLabel an genau einem Objekt (kein Loop)
+-- Code Puzzle: nur TextLabel an erstem passenden Objekt (Toggle bleibt)
 local function attachCodePuzzleLabelOnce()
     if codePuzzleLabelAttached then return end
     local target = nil
@@ -401,6 +426,59 @@ local function attachCodePuzzleLabelOnce()
         end
         codePuzzleLabelAttached = true
     end
+end
+
+-- =======================
+-- Auto-Combo-Code im Menü (kein Toggle)
+-- =======================
+local comboParagraph
+local comboLoop = nil
+
+local function getComboButtonsFolder()
+    local gk = workspace:FindFirstChild("GameKeeper")
+    if not gk then return nil end
+    local puzzles = gk:FindFirstChild("Puzzles")
+    if not puzzles then return nil end
+    local cp = puzzles:FindFirstChild("CombinationPuzzle")
+    if not cp then return nil end
+    local key = cp:FindFirstChild("CombinationKey")
+    if not key then return nil end
+    local buttonsRoot = key:FindFirstChild("Buttons")
+    if not buttonsRoot then return nil end
+    return buttonsRoot
+end
+
+local function readCombinationCode()
+    local root = getComboButtonsFolder()
+    if not root then return nil end
+    local out = {}
+    for i = 1, 3 do
+        local btn = root:FindFirstChild("Button"..i)
+        if not btn then return nil end
+        local bl = btn:FindFirstChild("ButtonLabel")
+        if not bl then return nil end
+        local label = bl:FindFirstChild("Label")
+        if not (label and label:IsA("TextLabel")) then return nil end
+        local txt = tostring(label.Text or "")
+        local digit = txt:match("(%d)%s*$") or txt:match("(%d)") or ""
+        if digit == "" then return nil end
+        table.insert(out, digit)
+    end
+    return table.concat(out, "")
+end
+
+local function startComboWatcher()
+    if comboLoop then task.cancel(comboLoop) end
+    comboLoop = task.spawn(function()
+        while true do
+            local code = nil
+            pcall(function() code = readCombinationCode() end)
+            if comboParagraph then
+                comboParagraph:SetDesc(code and code or "—")
+            end
+            task.wait(0.4)
+        end
+    end)
 end
 
 -- =======================
@@ -431,7 +509,7 @@ local function applyChamsToCharacter(plyr)
 end
 
 local function applyNametagToCharacter(plyr)
-    if not plyr or not plyr.Character or not plyr.Character:FindFirstChild("Head") then return end
+    if not plyr or not plyr.Character or not plyr.Character:FindChild("Head") then return end
     local head = plyr.Character.Head
     if not head:FindFirstChild("Nametag") then
         local b = createBillboard(plyr.Name)
@@ -450,7 +528,6 @@ local function hookPlayer(plyr)
         if chamsActive then applyChamsToCharacter(plyr) end
         if nametagActive then applyNametagToCharacter(plyr) end
     end
-    -- Team-Farbe kann wechseln -> kleiner, seltener Tick nur für Farbe
     if chamsActive then
         task.spawn(function()
             while chamsActive and plyr.Parent do
@@ -677,7 +754,10 @@ local function autoKillFunc()
                 end
                 if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
                     local targetPos = targetPlayer.Character.HumanoidRootPart.Position
-                    localHrp.CFrame = CFrame.new(targetPos + Vector3.new(0, 2, 0))
+                    local localPlayerHRP = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if localPlayerHRP then
+                        localPlayerHRP.CFrame = CFrame.new(targetPos + Vector3.new(0, 2, 0))
+                    end
                 end
             end
         end)
@@ -690,6 +770,12 @@ end
 -- =======================
 local ESPSection = Tabs.ESP:AddSection("ESP Toggles")
 local ESPColorsSection = Tabs.ESP:AddSection("ESP Colors")
+
+-- Auto-Combo-Code Anzeige
+local ComboCodeSection = Tabs.ESP:AddSection("Combination Puzzle")
+local comboUI = ComboCodeSection:AddParagraph({ Title = "Combination Code", Content = "—" })
+comboParagraph = comboUI
+startComboWatcher()
 
 ESPSection:AddToggle("CakeEspToggle", {
     Title = "Cake ESP",
@@ -739,11 +825,8 @@ ESPSection:AddToggle("ChamsToggle", {
         if state then
             for _, p in ipairs(Players:GetPlayers()) do if p ~= Players.LocalPlayer then hookPlayer(p) end end
             if chamsLoop then task.cancel(chamsLoop) end
-            -- kleiner Wartungsloop (keine Vollscans)
             chamsLoop = task.spawn(function()
-                while chamsActive do
-                    task.wait(1.5)
-                end
+                while chamsActive do task.wait(1.5) end
             end)
         else
             if chamsLoop then task.cancel(chamsLoop); chamsLoop=nil end
@@ -810,8 +893,9 @@ ESPSection:AddToggle("CubePuzzleEspToggle", {
     end
 })
 
+-- Code Puzzle ESP Toggle (nur Label; „NoLabel“-Kram existiert nicht mehr)
 ESPSection:AddToggle("CodePuzzleEspToggle", {
-    Title = "Code Puzzle (nur Label)",
+    Title = "Code Puzzle (Label)",
     Default = false,
     Callback = function(state)
         puzzleEspActive = state
@@ -834,7 +918,6 @@ ESPSection:AddToggle("CodePuzzleEspToggle", {
             end
         else
             if codePuzzleConnAdd then codePuzzleConnAdd:Disconnect(); codePuzzleConnAdd=nil end
-            -- alle evtl. Labels entfernen
             for _, obj in ipairs(workspace:GetDescendants()) do
                 if obj:IsA("BasePart") and obj:FindFirstChild("PuzzleLabel") then
                     obj.PuzzleLabel:Destroy()
@@ -845,6 +928,7 @@ ESPSection:AddToggle("CodePuzzleEspToggle", {
     end
 })
 
+-- Farben
 ESPColorsSection:AddColorpicker("CakeEspColor", {
     Title = "Cake ESP",
     Default = cakeEspColor,
@@ -1005,7 +1089,7 @@ AutoSection:AddToggle("AntiKickBypass", {
 })
 
 -- =======================
--- Visual Tab
+-- Visual Tab (mit Fixes)
 -- =======================
 local VisualSection = Tabs.Visual
 VisualSection:AddToggle("FullbrightToggle", {
@@ -1019,11 +1103,7 @@ VisualSection:AddToggle("FullbrightToggle", {
             Lighting.GlobalShadows = false
             Lighting.OutdoorAmbient = Color3.fromRGB(128,128,128)
         else
-            Lighting.Brightness = 1
-            Lighting.ClockTime = 14
-            Lighting.FogEnd = 1000
-            Lighting.GlobalShadows = true
-            Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
+            restoreLighting()
         end
     end
 })
@@ -1042,8 +1122,8 @@ VisualSection:AddToggle("NoFogToggle", {
             end)
         else
             if noFogLoop then task.cancel(noFogLoop); noFogLoop=nil end
-            Lighting.FogStart = 0
-            Lighting.FogEnd = 1000
+            Lighting.FogStart = initialLighting.FogStart
+            Lighting.FogEnd = initialLighting.FogEnd
         end
     end
 })
@@ -1077,15 +1157,15 @@ VisualSection:AddSlider("SunRaysIntensitySlider", {
 
 local LightingSection = Tabs.Visual:AddSection("Lighting Controls")
 LightingSection:AddSlider("ClockTimeSlider", {
-    Title="Time of Day", Default=0, Min=0, Max=24, Rounding=1,
+    Title="Time of Day", Default=initialLighting.ClockTime, Min=0, Max=24, Rounding=1,
     Callback=function(value) Lighting.ClockTime = value end
 })
 LightingSection:AddSlider("ExposureSlider", {
-    Title="Exposure", Default=0, Min=-3, Max=3, Rounding=2,
+    Title="Exposure", Default=initialLighting.ExposureCompensation, Min=-3, Max=3, Rounding=2,
     Callback=function(value) Lighting.ExposureCompensation = value end
 })
 LightingSection:AddToggle("ShadowsToggle", {
-    Title="Shadows", Default=true,
+    Title="Shadows", Default=initialLighting.GlobalShadows,
     Callback=function(state) Lighting.GlobalShadows = state end
 })
 
@@ -1093,18 +1173,12 @@ local UtilitySection = Tabs.Visual:AddSection("Utility")
 UtilitySection:AddButton({
     Title="Reset All Visual",
     Callback=function()
-        Lighting.Brightness = 1
-        Lighting.ClockTime = 14
-        Lighting.FogStart = 0
-        Lighting.FogEnd = 1000
-        Lighting.GlobalShadows = true
-        Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
-        Lighting.ExposureCompensation = 0
         if ccEffect then ccEffect:Destroy(); ccEffect=nil end
         if sunRaysEffect then sunRaysEffect:Destroy(); sunRaysEffect=nil end
-        ccActive=false; sunRaysActive=false; fullbrightActive=false
         if noFogLoop then task.cancel(noFogLoop); noFogLoop=nil; noFogActive=false end
-        Fluent:Notify({ Title="Visual Reset", Content="All visual settings reset to default", Duration=3 })
+        ccActive=false; sunRaysActive=false; fullbrightActive=false
+        restoreLighting()
+        Fluent:Notify({ Title="Visual Reset", Content="Lighting zurück auf Spiel-Originalwerte", Duration=3 })
     end
 })
 
