@@ -5,7 +5,7 @@
 local API_BASE        = "https://odd-frog-e89b.dosrobert69.workers.dev/api"
 local WORKINK_LINK    = "https://workink.net/22K7/7kr50x5g"
 local MAIN_SCRIPT_URL = "https://raw.githubusercontent.com/Massivendurchfall/cuddly-enigma/refs/heads/main/x"
-local LICENSE_DAYS    = 1
+local LICENSE_HOURS   = 8
 local SAVE_FILENAME   = "banana_key.txt"
 -- === END CONFIG ===
 
