@@ -1,3 +1,5 @@
+-- === Banana Eats Script (lag-fix ESP, mobile-safe) ===
+-- by Massivendurchfall + optimiert (Cache + Events, kein Vollscan pro Tick)
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
@@ -32,11 +34,59 @@ local Tabs = {
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
 }
 
-local cakeEspActive, cakeEspLoop = false, nil
-local cakeEspColor = Color3.fromRGB(255, 255, 0)
+-- =======================
+-- Helpers
+-- =======================
+local function createBillboard(text)
+    local billboard = Instance.new("BillboardGui")
+    billboard.AlwaysOnTop = true
+    billboard.Size = UDim2.new(0, 200, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
 
-local coinEspActive, coinEspLoop = false, nil
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.Text = text
+    textLabel.TextSize = 14
+    textLabel.Font = Enum.Font.GothamBold
+    textLabel.TextColor3 = Color3.new(1, 1, 1)
+    textLabel.TextStrokeTransparency = 0
+    textLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+    textLabel.Parent = billboard
+
+    return billboard
+end
+
+local function makeBoxAdornment(part, name, color, sizeInflate)
+    local esp = Instance.new("BoxHandleAdornment")
+    esp.Name = name
+    esp.Adornee = part
+    esp.AlwaysOnTop = true
+    esp.ZIndex = 10
+    esp.Size = part.Size + (sizeInflate or Vector3.new(0.2,0.2,0.2))
+    esp.Transparency = 0.5
+    esp.Color3 = color
+    esp.Parent = part
+    return esp
+end
+
+local function safePrimary(base)
+    if base:IsA("Model") and base.PrimaryPart then return base.PrimaryPart end
+    if base:IsA("BasePart") then return base end
+    local p = base:FindFirstChildWhichIsA("BasePart", true)
+    return p
+end
+
+-- =======================
+-- ESP State + Caches
+-- =======================
+local cakeEspActive, cakeLoop, cakeConnAdd, cakeConnRem = false, nil, nil, nil
+local cakeEspColor = Color3.fromRGB(255, 255, 0)
+local cakeTargets = {} -- [BasePart]=true
+
+local coinEspActive, coinLoop, coinConnAdd, coinConnRem = false, nil, nil, nil
 local coinEspColor = Color3.fromRGB(0, 255, 0)
+local coinTargets = {}
 
 local chamsActive, chamsLoop = false, nil
 local enemyChamColor = Color3.fromRGB(255, 0, 0)
@@ -44,16 +94,22 @@ local teamChamColor = Color3.fromRGB(0, 255, 0)
 
 local nametagActive, nametagLoop = false, nil
 
-local valveEspActive, valveEspLoop = false, nil
+local valveEspActive, valveLoop, valveConnAdd, valveConnRem = false, nil, nil, nil
 local valveEspColor = Color3.fromRGB(0, 255, 255)
+local valveTargets = {}
 
-local puzzleNumberEspActive, puzzleNumberEspLoop = false, nil
+local puzzleNumberEspActive, puzzleNumberLoop, puzzleNumConnAdd, puzzleNumConnRem = false, nil, nil, nil
 local puzzleNumberEspColor = Color3.fromRGB(255, 255, 255)
-local puzzleNumbers = {["23"] = true, ["34"] = true, ["31"] = true}
+local puzzleNumbers = {["23"]=true, ["34"]=true, ["31"]=true}
+local puzzleNumberTargets = {}
 
-local puzzleEspActive, puzzleEspLoop = false, nil
-local puzzleEspColor = Color3.fromRGB(0, 255, 0)
+-- Code Puzzle: nur Textlabel an einem Objekt (kein Box-ESP, kein Loop)
+local puzzleEspActive = false
+local codePuzzleLabelAttached = false
+local codePuzzleConnAdd = nil
+local puzzleEspColor = Color3.fromRGB(0, 255, 0) -- nur für evtl. zukünftige Nutzung
 
+-- Movement / Utility
 local speedLoop = nil
 local currentSpeed = 16
 
@@ -61,7 +117,6 @@ local flyActive = false
 local flySpeed = 50
 local flyBodyVelocity, flyBodyGyro, flyConnection = nil, nil, nil
 
--- Noclip variables
 local noclipActive = false
 local noclipConnection = nil
 local noclipParts = {}
@@ -83,20 +138,13 @@ local function enableAntiAfk()
         VirtualUser:ClickButton2(Vector2.new(0, 0))
     end)
 end
-
 local function disableAntiAfk()
-    if antiAfkConnection then
-        antiAfkConnection:Disconnect()
-        antiAfkConnection = nil
-    end
+    if antiAfkConnection then antiAfkConnection:Disconnect(); antiAfkConnection=nil end
 end
 
-local ccActive = false
-local ccEffect = nil
-local ccBrightness = 0
-local ccContrast = 0
-local ccSaturation = 1
-
+-- Visual FX
+local ccActive, ccEffect = false, nil
+local ccBrightness, ccContrast, ccSaturation = 0, 0, 1
 local function enableColorCorrection()
     if not Lighting:FindFirstChild("ColorCorrectionEffect") then
         ccEffect = Instance.new("ColorCorrectionEffect")
@@ -108,18 +156,11 @@ local function enableColorCorrection()
     ccEffect.Contrast = ccContrast
     ccEffect.Saturation = ccSaturation
 end
-
 local function disableColorCorrection()
-    if ccEffect then
-        ccEffect:Destroy()
-        ccEffect = nil
-    end
+    if ccEffect then ccEffect:Destroy(); ccEffect=nil end
 end
-
-local sunRaysActive = false
-local sunRaysEffect = nil
+local sunRaysActive, sunRaysEffect = false, nil
 local sunRaysIntensity = 0.3
-
 local function enableSunRays()
     if not Lighting:FindFirstChild("SunRaysEffect") then
         sunRaysEffect = Instance.new("SunRaysEffect")
@@ -129,100 +170,51 @@ local function enableSunRays()
     end
     sunRaysEffect.Intensity = sunRaysIntensity
 end
-
 local function disableSunRays()
-    if sunRaysEffect then
-        sunRaysEffect:Destroy()
-        sunRaysEffect = nil
-    end
+    if sunRaysEffect then sunRaysEffect:Destroy(); sunRaysEffect=nil end
 end
 
--- Noclip functions
-local function enableNoclip()
-    if noclipActive then return end
-    noclipActive = true
-    
-    local function noclipLoop()
-        local character = Players.LocalPlayer.Character
-        if character then
-            for _, part in pairs(character:GetDescendants()) do
-                if part:IsA("BasePart") and part.CanCollide then
-                    noclipParts[part] = true
-                    part.CanCollide = false
-                end
-            end
-        end
-    end
-    
-    noclipConnection = RunService.Stepped:Connect(noclipLoop)
-    
-    Fluent:Notify({
-        Title = "Noclip",
-        Content = "Noclip enabled",
-        Duration = 3
-    })
+-- =======================
+-- Cleanup Helpers
+-- =======================
+local function clearAdornment(part, name)
+    if part and part:FindFirstChild(name) then part[name]:Destroy() end
 end
-
-local function disableNoclip()
-    if not noclipActive then return end
-    noclipActive = false
-    
-    if noclipConnection then
-        noclipConnection:Disconnect()
-        noclipConnection = nil
-    end
-    
-    -- Restore collision for all parts that were modified
-    for part, _ in pairs(noclipParts) do
-        if part and part.Parent then
-            part.CanCollide = true
-        end
-    end
-    noclipParts = {}
-    
-    Fluent:Notify({
-        Title = "Noclip",
-        Content = "Noclip disabled",
-        Duration = 3
-    })
-end
-
-local function createBillboard(text, isNametag)
-    local billboard = Instance.new("BillboardGui")
-    billboard.AlwaysOnTop = true
-    billboard.Size = UDim2.new(0, 200, 0, 50)
-    billboard.StudsOffset = Vector3.new(0, 3, 0)
-
-    local textLabel = Instance.new("TextLabel")
-    textLabel.Size = UDim2.new(1, 0, 1, 0)
-    textLabel.BackgroundTransparency = 1
-    textLabel.Text = text
-    textLabel.TextSize = 14
-    textLabel.Font = Enum.Font.GothamBold
-    textLabel.TextColor3 = Color3.new(1, 1, 1)
-    textLabel.TextStrokeTransparency = 0
-    textLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
-    textLabel.Parent = billboard
-
-    return billboard
+local function clearBillboard(part, name)
+    if part and part:FindFirstChild(name) then part[name]:Destroy() end
 end
 
 local function removeCakeEsp()
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            if obj:FindFirstChild("CakeESP") then obj.CakeESP:Destroy() end
-            if obj:FindFirstChild("CakeLabel") then obj.CakeLabel:Destroy() end
+    for part in pairs(cakeTargets) do
+        if part and part.Parent then
+            clearAdornment(part,"CakeESP"); clearBillboard(part,"CakeLabel")
         end
     end
+    cakeTargets = {}
 end
-
 local function removeCoinEsp()
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            if obj:FindFirstChild("CoinESP") then obj.CoinESP:Destroy() end
-            if obj:FindFirstChild("CoinLabel") then obj.CoinLabel:Destroy() end
+    for part in pairs(coinTargets) do
+        if part and part.Parent then
+            clearAdornment(part,"CoinESP"); clearBillboard(part,"CoinLabel")
         end
     end
+    coinTargets = {}
+end
+local function removeValveEsp()
+    for part in pairs(valveTargets) do
+        if part and part.Parent then
+            clearAdornment(part,"ValveESP"); clearBillboard(part,"ValveLabel")
+        end
+    end
+    valveTargets = {}
+end
+local function removePuzzleNumberEsp()
+    for part in pairs(puzzleNumberTargets) do
+        if part and part.Parent then
+            clearAdornment(part,"PuzzleNumberESP"); clearBillboard(part,"PuzzleNumberLabel")
+        end
+    end
+    puzzleNumberTargets = {}
 end
 
 local function removeChams()
@@ -236,7 +228,6 @@ local function removeChams()
         end
     end
 end
-
 local function removeNametags()
     for _, plyr in pairs(Players:GetPlayers()) do
         if plyr.Character and plyr.Character:FindFirstChild("Head") then
@@ -246,232 +237,263 @@ local function removeNametags()
     end
 end
 
-local function removeValveEsp()
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            if obj:FindFirstChild("ValveESP") then obj.ValveESP:Destroy() end
-            if obj:FindFirstChild("ValveLabel") then obj.ValveLabel:Destroy() end
+-- =======================
+-- Target Detection (incremental)
+-- =======================
+local function isCakePart(obj)
+    if not obj:IsA("BasePart") then return false end
+    local p = obj.Parent
+    if not p then return false end
+    if (p.Name=="Cake" and tonumber(obj.Name)) then return true end
+    if (p.Name=="CakePlate" and obj.Name=="Plate") then return true end
+    return false
+end
+
+local function isCoinPart(obj)
+    if not obj:IsA("BasePart") then return false end
+    local p = obj.Parent
+    return p and p.Name=="Tokens" and obj.Name=="Token"
+end
+
+local function isValveBase(obj)
+    if not obj:IsA("BasePart") then return false end
+    local parent = obj.Parent
+    if not parent then return false end
+    if parent.Name=="Valve" or parent.Name=="ValvePuzzle" then return true end
+    if parent.Name=="Buttons" and obj.Name=="ValveButton" then return true end
+    return false
+end
+
+local function isPuzzleNumber(obj)
+    if not obj:IsA("BasePart") then return false end
+    local parent = obj.Parent
+    return parent and parent.Name=="Buttons" and puzzleNumbers[obj.Name]==true
+end
+
+-- Initial scan helpers
+local function initialScanAndCache(predicate, cacheTable)
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if predicate(obj) then
+            cacheTable[obj] = true
         end
     end
 end
 
-local function removePuzzleNumberEsp()
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj.Parent and obj.Parent.Name == "Buttons" and puzzleNumbers[obj.Name] then
-            if obj:FindFirstChild("PuzzleNumberESP") then obj.PuzzleNumberESP:Destroy() end
-            if obj:FindFirstChild("PuzzleNumberLabel") then obj.PuzzleNumberLabel:Destroy() end
-        end
-    end
+local function hookWorkspace(predicate, cacheTable, onAddRef, onRemRef)
+    if onAddRef then onAddRef:Disconnect() end
+    if onRemRef then onRemRef:Disconnect() end
+    local addConn = workspace.DescendantAdded:Connect(function(obj)
+        if predicate(obj) then cacheTable[obj] = true end
+    end)
+    local remConn = workspace.DescendantRemoving:Connect(function(obj)
+        if cacheTable[obj] then cacheTable[obj] = nil end
+    end)
+    return addConn, remConn
 end
 
-local function removePuzzleEsp()
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            if obj:FindFirstChild("PuzzleLabel") then obj.PuzzleLabel:Destroy() end
-        end
-    end
-end
-
+-- =======================
+-- ESP Loops (cache-driven)
+-- =======================
 local function cakeEspLoopFunction()
+    local waitTime = isMobile and 0.5 or 0.25
     while cakeEspActive do
-        pcall(function()
-            for _, obj in pairs(workspace:GetDescendants()) do
-                if obj:IsA("BasePart") and ((obj.Parent and obj.Parent.Name == "Cake" and tonumber(obj.Name)) or (obj.Parent and obj.Parent.Name == "CakePlate" and obj.Name == "Plate")) then
-                    if not obj:FindFirstChild("CakeESP") then
-                        local esp = Instance.new("BoxHandleAdornment")
-                        esp.Name = "CakeESP"
-                        esp.Adornee = obj
-                        esp.AlwaysOnTop = true
-                        esp.ZIndex = 10
-                        esp.Size = obj.Size + Vector3.new(0.2, 0.2, 0.2)
-                        esp.Transparency = 0.5
-                        esp.Color3 = cakeEspColor
-                        esp.Parent = obj
-                    end
-                    if not obj:FindFirstChild("CakeLabel") then
-                        local billboard = createBillboard("Cake Plate")
-                        billboard.Name = "CakeLabel"
-                        billboard.Parent = obj
-                    end
+        for part in pairs(cakeTargets) do
+            if part and part.Parent then
+                if not part:FindFirstChild("CakeESP") then
+                    makeBoxAdornment(part,"CakeESP",cakeEspColor)
+                else
+                    part.CakeESP.Color3 = cakeEspColor
                 end
+                if not part:FindFirstChild("CakeLabel") then
+                    local b = createBillboard("Cake Plate"); b.Name="CakeLabel"; b.Parent = part
+                end
+            else
+                cakeTargets[part] = nil
             end
-        end)
-        task.wait(3)
+        end
+        task.wait(waitTime)
     end
 end
 
 local function coinEspLoopFunction()
+    local waitTime = isMobile and 0.5 or 0.25
     while coinEspActive do
-        pcall(function()
-            for _, obj in pairs(workspace:GetDescendants()) do
-                if obj:IsA("BasePart") and obj.Parent and obj.Parent.Name == "Tokens" and obj.Name == "Token" then
-                    if not obj:FindFirstChild("CoinESP") then
-                        local esp = Instance.new("BoxHandleAdornment")
-                        esp.Name = "CoinESP"
-                        esp.Adornee = obj
-                        esp.AlwaysOnTop = true
-                        esp.ZIndex = 10
-                        esp.Size = obj.Size + Vector3.new(0.2, 0.2, 0.2)
-                        esp.Transparency = 0.5
-                        esp.Color3 = coinEspColor
-                        esp.Parent = obj
-                    end
-                    if not obj:FindFirstChild("CoinLabel") then
-                        local billboard = createBillboard("Coin")
-                        billboard.Name = "CoinLabel"
-                        billboard.Parent = obj
-                    end
+        for part in pairs(coinTargets) do
+            if part and part.Parent then
+                if not part:FindFirstChild("CoinESP") then
+                    makeBoxAdornment(part,"CoinESP",coinEspColor)
+                else
+                    part.CoinESP.Color3 = coinEspColor
                 end
-            end
-        end)
-        task.wait(3)
-    end
-end
-
-local function chamsLoopFunction()
-    while chamsActive do
-        pcall(function()
-            for _, plyr in pairs(Players:GetPlayers()) do
-                if plyr ~= Players.LocalPlayer and plyr.Character then
-                    local sameTeam = (plyr.TeamColor == Players.LocalPlayer.TeamColor)
-                    local color = sameTeam and teamChamColor or enemyChamColor
-                    for _, part in pairs(plyr.Character:GetDescendants()) do
-                        if part:IsA("BasePart") then
-                            local cham = part:FindFirstChild("Cham")
-                            if not cham then
-                                cham = Instance.new("BoxHandleAdornment")
-                                cham.Name = "Cham"
-                                cham.Adornee = part
-                                cham.AlwaysOnTop = true
-                                cham.ZIndex = 10
-                                cham.Size = part.Size + Vector3.new(0.1, 0.1, 0.1)
-                                cham.Transparency = 0.5
-                                cham.Color3 = color
-                                cham.Parent = part
-                            else
-                                cham.Color3 = color
-                            end
-                        end
-                    end
+                if not part:FindFirstChild("CoinLabel") then
+                    local b = createBillboard("Coin"); b.Name="CoinLabel"; b.Parent = part
                 end
+            else
+                coinTargets[part] = nil
             end
-        end)
-        task.wait(4)
-    end
-end
-
-local function nametagLoopFunction()
-    while nametagActive do
-        pcall(function()
-            for _, plyr in pairs(Players:GetPlayers()) do
-                if plyr ~= Players.LocalPlayer and plyr.Character and plyr.Character:FindFirstChild("Head") then
-                    local sameTeam = (plyr.TeamColor == Players.LocalPlayer.TeamColor)
-                    local color = sameTeam and teamChamColor or enemyChamColor
-                    local head = plyr.Character.Head
-                    local existingTag = head:FindFirstChild("Nametag")
-                    if not existingTag then
-                        local billboard = createBillboard(plyr.Name)
-                        billboard.Name = "Nametag"
-                        billboard.Parent = head
-                    end
-                end
-            end
-        end)
-        task.wait(4)
+        end
+        task.wait(waitTime)
     end
 end
 
 local function valveEspLoopFunction()
+    local waitTime = isMobile and 0.6 or 0.3
     while valveEspActive do
-        pcall(function()
-            for _, obj in pairs(workspace:GetDescendants()) do
-                if obj:IsA("BasePart") then
-                    local parent = obj.Parent
-                    if parent and ((parent.Name == "Valve" or parent.Name == "ValvePuzzle") or (parent.Name == "Buttons" and obj.Name == "ValveButton")) then
-                        local basePart = obj
-                        if parent:IsA("Model") and parent.PrimaryPart then
-                            basePart = parent.PrimaryPart
-                        end
-                        if not basePart:FindFirstChild("ValveESP") then
-                            local esp = Instance.new("BoxHandleAdornment")
-                            esp.Name = "ValveESP"
-                            esp.Adornee = basePart
-                            esp.AlwaysOnTop = true
-                            esp.ZIndex = 10
-                            esp.Size = basePart.Size + Vector3.new(0.2, 0.2, 0.2)
-                            esp.Transparency = 0.5
-                            esp.Color3 = valveEspColor
-                            esp.Parent = basePart
-                        end
-                        if not basePart:FindFirstChild("ValveLabel") then
-                            local billboard = createBillboard("Valve")
-                            billboard.Name = "ValveLabel"
-                            billboard.Parent = basePart
-                        end
+        for base in pairs(valveTargets) do
+            if base and base.Parent then
+                local part = safePrimary(base) or base
+                if part then
+                    if not part:FindFirstChild("ValveESP") then
+                        makeBoxAdornment(part,"ValveESP",valveEspColor)
+                    else
+                        part.ValveESP.Color3 = valveEspColor
+                    end
+                    if not part:FindFirstChild("ValveLabel") then
+                        local b = createBillboard("Valve"); b.Name="ValveLabel"; b.Parent = part
                     end
                 end
+            else
+                valveTargets[base] = nil
             end
-        end)
-        task.wait(4)
+        end
+        task.wait(waitTime)
     end
 end
 
 local function puzzleNumberEspLoopFunction()
+    local waitTime = isMobile and 0.6 or 0.3
     while puzzleNumberEspActive do
-        pcall(function()
-            for _, obj in pairs(workspace:GetDescendants()) do
-                if obj:IsA("BasePart") and obj.Parent and obj.Parent.Name == "Buttons" and puzzleNumbers[obj.Name] then
-                    if not obj:FindFirstChild("PuzzleNumberESP") then
-                        local esp = Instance.new("BoxHandleAdornment")
-                        esp.Name = "PuzzleNumberESP"
-                        esp.Adornee = obj
-                        esp.AlwaysOnTop = true
-                        esp.ZIndex = 10
-                        esp.Size = obj.Size + Vector3.new(0.2, 0.2, 0.2)
-                        esp.Transparency = 0.5
-                        esp.Color3 = puzzleNumberEspColor
-                        esp.Parent = obj
-                    end
-                    if not obj:FindFirstChild("PuzzleNumberLabel") then
-                        local billboard = createBillboard("Cube Puzzle")
-                        billboard.Name = "PuzzleNumberLabel"
-                        billboard.Parent = obj
-                    end
+        for part in pairs(puzzleNumberTargets) do
+            if part and part.Parent then
+                if not part:FindFirstChild("PuzzleNumberESP") then
+                    makeBoxAdornment(part,"PuzzleNumberESP",puzzleNumberEspColor)
+                else
+                    part.PuzzleNumberESP.Color3 = puzzleNumberEspColor
                 end
+                if not part:FindFirstChild("PuzzleNumberLabel") then
+                    local b = createBillboard("Cube Puzzle"); b.Name="PuzzleNumberLabel"; b.Parent = part
+                end
+            else
+                puzzleNumberTargets[part] = nil
+            end
+        end
+        task.wait(waitTime)
+    end
+end
+
+-- Code Puzzle: nur TextLabel an genau einem Objekt (kein Loop)
+local function attachCodePuzzleLabelOnce()
+    if codePuzzleLabelAttached then return end
+    local target = nil
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local fullname = obj:GetFullName():lower()
+            if fullname:find("combinationpuzzle") then
+                target = obj; break
+            end
+        end
+    end
+    if target then
+        if not target:FindFirstChild("PuzzleLabel") then
+            local b = createBillboard("Code Puzzle")
+            b.Name = "PuzzleLabel"
+            b.Parent = target
+        end
+        codePuzzleLabelAttached = true
+    end
+end
+
+-- =======================
+-- Chams & Nametags (event-driven)
+-- =======================
+local function applyChamsToCharacter(plyr)
+    if not plyr or not plyr.Character then return end
+    local sameTeam = (plyr.TeamColor == Players.LocalPlayer.TeamColor)
+    local color = sameTeam and teamChamColor or enemyChamColor
+    for _, part in pairs(plyr.Character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            local cham = part:FindFirstChild("Cham")
+            if not cham then
+                cham = Instance.new("BoxHandleAdornment")
+                cham.Name = "Cham"
+                cham.Adornee = part
+                cham.AlwaysOnTop = true
+                cham.ZIndex = 10
+                cham.Size = part.Size + Vector3.new(0.1, 0.1, 0.1)
+                cham.Transparency = 0.5
+                cham.Color3 = color
+                cham.Parent = part
+            else
+                cham.Color3 = color
+            end
+        end
+    end
+end
+
+local function applyNametagToCharacter(plyr)
+    if not plyr or not plyr.Character or not plyr.Character:FindFirstChild("Head") then return end
+    local head = plyr.Character.Head
+    if not head:FindFirstChild("Nametag") then
+        local b = createBillboard(plyr.Name)
+        b.Name = "Nametag"
+        b.Parent = head
+    end
+end
+
+local function hookPlayer(plyr)
+    plyr.CharacterAdded:Connect(function()
+        task.wait(0.2)
+        if chamsActive then applyChamsToCharacter(plyr) end
+        if nametagActive then applyNametagToCharacter(plyr) end
+    end)
+    if plyr.Character then
+        if chamsActive then applyChamsToCharacter(plyr) end
+        if nametagActive then applyNametagToCharacter(plyr) end
+    end
+    -- Team-Farbe kann wechseln -> kleiner, seltener Tick nur für Farbe
+    if chamsActive then
+        task.spawn(function()
+            while chamsActive and plyr.Parent do
+                if plyr.Character then applyChamsToCharacter(plyr) end
+                task.wait(1.0)
             end
         end)
-        task.wait(4)
     end
 end
 
-local function codePuzzleEspLoopFunction()
-    while puzzleEspActive do
-        pcall(function()
-            for _, obj in pairs(workspace:GetDescendants()) do
-                if obj:IsA("BasePart") then
-                    local fullname = obj:GetFullName():lower()
-                    if fullname:find("combinationpuzzle") then
-                        if not obj:FindFirstChild("PuzzleLabel") then
-                            local billboard = createBillboard("Code Puzzle")
-                            billboard.Name = "PuzzleLabel"
-                            billboard.Parent = obj
-                        end
-                    end
+-- =======================
+-- Noclip
+-- =======================
+local function enableNoclip()
+    if noclipActive then return end
+    noclipActive = true
+    noclipConnection = RunService.Stepped:Connect(function()
+        local character = Players.LocalPlayer.Character
+        if character then
+            for _, part in pairs(character:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    noclipParts[part] = true
+                    part.CanCollide = false
                 end
             end
-        end)
-        task.wait(5)
+        end
+    end)
+    Fluent:Notify({ Title="Noclip", Content="Noclip enabled", Duration=3 })
+end
+local function disableNoclip()
+    if not noclipActive then return end
+    noclipActive = false
+    if noclipConnection then noclipConnection:Disconnect(); noclipConnection=nil end
+    for part in pairs(noclipParts) do
+        if part and part.Parent then part.CanCollide = true end
     end
+    noclipParts = {}
+    Fluent:Notify({ Title="Noclip", Content="Noclip disabled", Duration=3 })
 end
 
-local function noFogLoopFunction()
-    while noFogActive do
-        Lighting.FogStart = 0
-        Lighting.FogEnd = 1e9
-        task.wait(1)
-    end
-end
-
+-- =======================
+-- Fly
+-- =======================
 local function enableFly()
     local character = Players.LocalPlayer.Character
     if character and character:FindFirstChild("HumanoidRootPart") then
@@ -501,11 +523,9 @@ local function enableFly()
                 button.TextScaled = true
                 button.Font = Enum.Font.GothamBold
                 button.Parent = flyGui
-                
                 local corner = Instance.new("UICorner")
                 corner.CornerRadius = UDim.new(0, 8)
                 corner.Parent = button
-                
                 return button
             end
 
@@ -516,75 +536,48 @@ local function enableFly()
             local leftButton = createFlyButton("◄", UDim2.new(0.3, -40, 0.5, 0), UDim2.new(0, 80, 0, 60))
             local rightButton = createFlyButton("►", UDim2.new(0.7, -40, 0.5, 0), UDim2.new(0, 80, 0, 60))
 
-            flyConnection = RunService.RenderStepped:Connect(function()
-                local direction = Vector3.new(0, 0, 0)
-                
-                if upButton.Parent and GuiService:IsTenFootInterface() then
-                    return
-                end
-                
-                flyBodyVelocity.Velocity = direction.Unit * flySpeed
-                flyBodyGyro.CFrame = workspace.CurrentCamera.CFrame
-            end)
-
-            local function handleMobileInput(button, directionVector)
-                local inputBegan, inputEnded
-                
-                inputBegan = button.InputBegan:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.Touch then
-                        flyConnection:Disconnect()
-                        flyConnection = RunService.RenderStepped:Connect(function()
-                            flyBodyVelocity.Velocity = directionVector.Unit * flySpeed
-                            flyBodyGyro.CFrame = workspace.CurrentCamera.CFrame
-                        end)
-                    end
+            local function setDir(vec)
+                if flyConnection then flyConnection:Disconnect() end
+                flyConnection = RunService.RenderStepped:Connect(function()
+                    flyBodyVelocity.Velocity = vec.Unit * flySpeed
+                    flyBodyGyro.CFrame = workspace.CurrentCamera.CFrame
                 end)
-                
-                inputEnded = button.InputEnded:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.Touch then
-                        flyConnection:Disconnect()
-                        flyConnection = RunService.RenderStepped:Connect(function()
-                            flyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
-                            flyBodyGyro.CFrame = workspace.CurrentCamera.CFrame
-                        end)
-                    end
+            end
+            local function clearDir()
+                if flyConnection then flyConnection:Disconnect() end
+                flyConnection = RunService.RenderStepped:Connect(function()
+                    flyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
+                    flyBodyGyro.CFrame = workspace.CurrentCamera.CFrame
                 end)
             end
 
-            handleMobileInput(forwardButton, workspace.CurrentCamera.CFrame.LookVector)
-            handleMobileInput(backwardButton, -workspace.CurrentCamera.CFrame.LookVector)
-            handleMobileInput(leftButton, -workspace.CurrentCamera.CFrame.RightVector)
-            handleMobileInput(rightButton, workspace.CurrentCamera.CFrame.RightVector)
-            handleMobileInput(upButton, Vector3.new(0, 1, 0))
-            handleMobileInput(downButton, Vector3.new(0, -1, 0))
+            local function bind(button, vec)
+                button.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.Touch then setDir(vec) end
+                end)
+                button.InputEnded:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.Touch then clearDir() end
+                end)
+            end
+
+            bind(forwardButton, workspace.CurrentCamera.CFrame.LookVector)
+            bind(backwardButton, -workspace.CurrentCamera.CFrame.LookVector)
+            bind(leftButton, -workspace.CurrentCamera.CFrame.RightVector)
+            bind(rightButton, workspace.CurrentCamera.CFrame.RightVector)
+            bind(upButton, Vector3.new(0,1,0))
+            bind(downButton, Vector3.new(0,-1,0))
         else
             flyConnection = RunService.RenderStepped:Connect(function()
-                local direction = Vector3.new(0, 0, 0)
-                if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-                    direction = direction + workspace.CurrentCamera.CFrame.LookVector
-                end
-                if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-                    direction = direction - workspace.CurrentCamera.CFrame.LookVector
-                end
-                if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-                    direction = direction - workspace.CurrentCamera.CFrame.RightVector
-                end
-                if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-                    direction = direction + workspace.CurrentCamera.CFrame.RightVector
-                end
-                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-                    direction = direction + Vector3.new(0, 1, 0)
-                end
-                if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-                    direction = direction - Vector3.new(0, 1, 0)
-                end
-
-                if direction.Magnitude > 0 then
-                    flyBodyVelocity.Velocity = direction.Unit * flySpeed
-                else
-                    flyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
-                end
-                flyBodyGyro.CFrame = workspace.CurrentCamera.CFrame
+                local dir = Vector3.new(0,0,0)
+                local cam = workspace.CurrentCamera
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0,1,0) end
+                if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0,1,0) end
+                flyBodyVelocity.Velocity = (dir.Magnitude > 0) and dir.Unit * flySpeed or Vector3.new(0,0,0)
+                flyBodyGyro.CFrame = cam.CFrame
             end)
         end
     end
@@ -592,30 +585,21 @@ end
 
 local function disableFly()
     flyActive = false
-    if flyBodyVelocity then
-        flyBodyVelocity:Destroy()
-        flyBodyVelocity = nil
-    end
-    if flyBodyGyro then
-        flyBodyGyro:Destroy()
-        flyBodyGyro = nil
-    end
-    if flyConnection then
-        flyConnection:Disconnect()
-        flyConnection = nil
-    end
-    
+    if flyBodyVelocity then flyBodyVelocity:Destroy(); flyBodyVelocity=nil end
+    if flyBodyGyro then flyBodyGyro:Destroy(); flyBodyGyro=nil end
+    if flyConnection then flyConnection:Disconnect(); flyConnection=nil end
     if isMobile then
         local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
         if playerGui then
             local flyGui = playerGui:FindFirstChild("FlyControlsGUI")
-            if flyGui then
-                flyGui:Destroy()
-            end
+            if flyGui then flyGui:Destroy() end
         end
     end
 end
 
+-- =======================
+-- AntiKick
+-- =======================
 local function startAntiKick()
     if not antiKickConnection then
         antiKickConnection = Players.LocalPlayer.Idled:Connect(function()
@@ -624,23 +608,20 @@ local function startAntiKick()
         end)
     end
 end
-
 local function stopAntiKick()
-    if antiKickConnection then
-        antiKickConnection:Disconnect()
-        antiKickConnection = nil
-    end
+    if antiKickConnection then antiKickConnection:Disconnect(); antiKickConnection=nil end
 end
 
+-- =======================
+-- Auto Features
+-- =======================
 local function autoDeletePeelsFunc()
     while autoDeletePeelsActive do
         pcall(function()
             local peelsFolder = (workspace:FindFirstChild("GameKeeper") and workspace.GameKeeper:FindFirstChild("Map") and workspace.GameKeeper.Map:FindFirstChild("Peels")) or workspace:FindFirstChild("Peels")
             if peelsFolder then
                 for _, peel in ipairs(peelsFolder:GetChildren()) do
-                    if peel and peel.Name:lower():find("peel") then
-                        peel:Destroy()
-                    end
+                    if peel and peel.Name:lower():find("peel") then peel:Destroy() end
                 end
             end
         end)
@@ -651,18 +632,18 @@ end
 local function autoCollectCoinsFunc()
     while autoCollectCoinsActive do
         pcall(function()
-            for _, obj in ipairs(workspace:GetDescendants()) do
-                if obj and obj.Name:lower():find("token") and obj:IsA("BasePart") then
+            for part in pairs(coinTargets) do
+                if part and part.Parent then
                     local char = Players.LocalPlayer.Character
                     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                    if hrp and obj.Parent then
-                        hrp.CFrame = CFrame.new(obj.Position + Vector3.new(0, 2, 0))
-                        task.wait(0.3)
+                    if hrp then
+                        hrp.CFrame = CFrame.new(part.Position + Vector3.new(0, 2, 0))
+                        task.wait(0.25)
                     end
                 end
             end
         end)
-        task.wait(3)
+        task.wait(0.8)
     end
 end
 
@@ -670,9 +651,7 @@ local function autoDeleteLockersFunc()
     while autoDeleteLockersActive do
         pcall(function()
             for _, desc in ipairs(workspace:GetDescendants()) do
-                if desc and desc.Name:lower():find("locker") then
-                    desc:Destroy()
-                end
+                if desc and desc.Name:lower():find("locker") then desc:Destroy() end
             end
         end)
         task.wait(5)
@@ -685,35 +664,30 @@ local function autoKillFunc()
             local localPlayer = Players.LocalPlayer
             local localChar = localPlayer.Character
             local localHrp = localChar and localChar:FindFirstChild("HumanoidRootPart")
-            
             if localHrp and localPlayer.Team and localPlayer.Team.Name == "Banana" then
-                local targetPlayer = nil
-                local shortestDistance = math.huge
-                
-                for _, player in ipairs(Players:GetPlayers()) do
-                    if player ~= localPlayer and player.Team and player.Team.Name == "Runners" then
-                        local char = player.Character
-                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                local targetPlayer, shortest = nil, math.huge
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= localPlayer and p.Team and p.Team.Name == "Runners" then
+                        local c = p.Character; local hrp = c and c:FindFirstChild("HumanoidRootPart")
                         if hrp then
-                            local distance = (localHrp.Position - hrp.Position).Magnitude
-                            if distance < shortestDistance then
-                                shortestDistance = distance
-                                targetPlayer = player
-                            end
+                            local d = (localHrp.Position - hrp.Position).Magnitude
+                            if d < shortest then shortest = d; targetPlayer = p end
                         end
                     end
                 end
-                
                 if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
                     local targetPos = targetPlayer.Character.HumanoidRootPart.Position
                     localHrp.CFrame = CFrame.new(targetPos + Vector3.new(0, 2, 0))
                 end
             end
         end)
-        task.wait(1)
+        task.wait(0.6)
     end
 end
 
+-- =======================
+-- UI: ESP
+-- =======================
 local ESPSection = Tabs.ESP:AddSection("ESP Toggles")
 local ESPColorsSection = Tabs.ESP:AddSection("ESP Colors")
 
@@ -723,11 +697,15 @@ ESPSection:AddToggle("CakeEspToggle", {
     Callback = function(state)
         cakeEspActive = state
         if state then
-            if cakeEspLoop then task.cancel(cakeEspLoop) end
-            cakeEspLoop = task.spawn(cakeEspLoopFunction)
+            removeCakeEsp()
+            initialScanAndCache(isCakePart, cakeTargets)
+            cakeConnAdd, cakeConnRem = hookWorkspace(isCakePart, cakeTargets, cakeConnAdd, cakeConnRem)
+            if cakeLoop then task.cancel(cakeLoop) end
+            cakeLoop = task.spawn(cakeEspLoopFunction)
         else
-            if cakeEspLoop then task.cancel(cakeEspLoop) end
-            cakeEspLoop = nil
+            if cakeLoop then task.cancel(cakeLoop); cakeLoop=nil end
+            if cakeConnAdd then cakeConnAdd:Disconnect(); cakeConnAdd=nil end
+            if cakeConnRem then cakeConnRem:Disconnect(); cakeConnRem=nil end
             removeCakeEsp()
         end
     end
@@ -739,11 +717,15 @@ ESPSection:AddToggle("CoinEspToggle", {
     Callback = function(state)
         coinEspActive = state
         if state then
-            if coinEspLoop then task.cancel(coinEspLoop) end
-            coinEspLoop = task.spawn(coinEspLoopFunction)
+            removeCoinEsp()
+            initialScanAndCache(isCoinPart, coinTargets)
+            coinConnAdd, coinConnRem = hookWorkspace(isCoinPart, coinTargets, coinConnAdd, coinConnRem)
+            if coinLoop then task.cancel(coinLoop) end
+            coinLoop = task.spawn(coinEspLoopFunction)
         else
-            if coinEspLoop then task.cancel(coinEspLoop) end
-            coinEspLoop = nil
+            if coinLoop then task.cancel(coinLoop); coinLoop=nil end
+            if coinConnAdd then coinConnAdd:Disconnect(); coinConnAdd=nil end
+            if coinConnRem then coinConnRem:Disconnect(); coinConnRem=nil end
             removeCoinEsp()
         end
     end
@@ -755,11 +737,16 @@ ESPSection:AddToggle("ChamsToggle", {
     Callback = function(state)
         chamsActive = state
         if state then
+            for _, p in ipairs(Players:GetPlayers()) do if p ~= Players.LocalPlayer then hookPlayer(p) end end
             if chamsLoop then task.cancel(chamsLoop) end
-            chamsLoop = task.spawn(chamsLoopFunction)
+            -- kleiner Wartungsloop (keine Vollscans)
+            chamsLoop = task.spawn(function()
+                while chamsActive do
+                    task.wait(1.5)
+                end
+            end)
         else
-            if chamsLoop then task.cancel(chamsLoop) end
-            chamsLoop = nil
+            if chamsLoop then task.cancel(chamsLoop); chamsLoop=nil end
             removeChams()
         end
     end
@@ -771,11 +758,13 @@ ESPSection:AddToggle("NametagToggle", {
     Callback = function(state)
         nametagActive = state
         if state then
+            for _, p in ipairs(Players:GetPlayers()) do if p ~= Players.LocalPlayer then hookPlayer(p) end end
             if nametagLoop then task.cancel(nametagLoop) end
-            nametagLoop = task.spawn(nametagLoopFunction)
+            nametagLoop = task.spawn(function()
+                while nametagActive do task.wait(2.0) end
+            end)
         else
-            if nametagLoop then task.cancel(nametagLoop) end
-            nametagLoop = nil
+            if nametagLoop then task.cancel(nametagLoop); nametagLoop=nil end
             removeNametags()
         end
     end
@@ -787,11 +776,15 @@ ESPSection:AddToggle("ValveEspToggle", {
     Callback = function(state)
         valveEspActive = state
         if state then
-            if valveEspLoop then task.cancel(valveEspLoop) end
-            valveEspLoop = task.spawn(valveEspLoopFunction)
+            removeValveEsp()
+            initialScanAndCache(isValveBase, valveTargets)
+            valveConnAdd, valveConnRem = hookWorkspace(isValveBase, valveTargets, valveConnAdd, valveConnRem)
+            if valveLoop then task.cancel(valveLoop) end
+            valveLoop = task.spawn(valveEspLoopFunction)
         else
-            if valveEspLoop then task.cancel(valveEspLoop) end
-            valveEspLoop = nil
+            if valveLoop then task.cancel(valveLoop); valveLoop=nil end
+            if valveConnAdd then valveConnAdd:Disconnect(); valveConnAdd=nil end
+            if valveConnRem then valveConnRem:Disconnect(); valveConnRem=nil end
             removeValveEsp()
         end
     end
@@ -803,28 +796,51 @@ ESPSection:AddToggle("CubePuzzleEspToggle", {
     Callback = function(state)
         puzzleNumberEspActive = state
         if state then
-            if puzzleNumberEspLoop then task.cancel(puzzleNumberEspLoop) end
-            puzzleNumberEspLoop = task.spawn(puzzleNumberEspLoopFunction)
+            removePuzzleNumberEsp()
+            initialScanAndCache(isPuzzleNumber, puzzleNumberTargets)
+            puzzleNumConnAdd, puzzleNumConnRem = hookWorkspace(isPuzzleNumber, puzzleNumberTargets, puzzleNumConnAdd, puzzleNumConnRem)
+            if puzzleNumberLoop then task.cancel(puzzleNumberLoop) end
+            puzzleNumberLoop = task.spawn(puzzleNumberEspLoopFunction)
         else
-            if puzzleNumberEspLoop then task.cancel(puzzleNumberEspLoop) end
-            puzzleNumberEspLoop = nil
+            if puzzleNumberLoop then task.cancel(puzzleNumberLoop); puzzleNumberLoop=nil end
+            if puzzleNumConnAdd then puzzleNumConnAdd:Disconnect(); puzzleNumConnAdd=nil end
+            if puzzleNumConnRem then puzzleNumConnRem:Disconnect(); puzzleNumConnRem=nil end
             removePuzzleNumberEsp()
         end
     end
 })
 
 ESPSection:AddToggle("CodePuzzleEspToggle", {
-    Title = "Code Puzzle ESP",
+    Title = "Code Puzzle (nur Label)",
     Default = false,
     Callback = function(state)
         puzzleEspActive = state
         if state then
-            if puzzleEspLoop then task.cancel(puzzleEspLoop) end
-            puzzleEspLoop = task.spawn(codePuzzleEspLoopFunction)
+            codePuzzleLabelAttached = false
+            attachCodePuzzleLabelOnce()
+            if not codePuzzleConnAdd then
+                codePuzzleConnAdd = workspace.DescendantAdded:Connect(function(obj)
+                    if not puzzleEspActive or codePuzzleLabelAttached then return end
+                    if obj:IsA("BasePart") then
+                        local fullname = obj:GetFullName():lower()
+                        if fullname:find("combinationpuzzle") then
+                            if not obj:FindFirstChild("PuzzleLabel") then
+                                local b = createBillboard("Code Puzzle"); b.Name="PuzzleLabel"; b.Parent=obj
+                            end
+                            codePuzzleLabelAttached = true
+                        end
+                    end
+                end)
+            end
         else
-            if puzzleEspLoop then task.cancel(puzzleEspLoop) end
-            puzzleEspLoop = nil
-            removePuzzleEsp()
+            if codePuzzleConnAdd then codePuzzleConnAdd:Disconnect(); codePuzzleConnAdd=nil end
+            -- alle evtl. Labels entfernen
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("BasePart") and obj:FindFirstChild("PuzzleLabel") then
+                    obj.PuzzleLabel:Destroy()
+                end
+            end
+            codePuzzleLabelAttached = false
         end
     end
 })
@@ -832,162 +848,104 @@ ESPSection:AddToggle("CodePuzzleEspToggle", {
 ESPColorsSection:AddColorpicker("CakeEspColor", {
     Title = "Cake ESP",
     Default = cakeEspColor,
-    Callback = function(color)
-        cakeEspColor = color
-    end
+    Callback = function(color) cakeEspColor = color end
 })
-
 ESPColorsSection:AddColorpicker("CoinEspColor", {
     Title = "Coin ESP",
     Default = coinEspColor,
-    Callback = function(color)
-        coinEspColor = color
-    end
+    Callback = function(color) coinEspColor = color end
 })
-
 ESPColorsSection:AddColorpicker("EnemyChamsColor", {
     Title = "Enemy Chams",
     Default = enemyChamColor,
-    Callback = function(color)
-        enemyChamColor = color
-    end
+    Callback = function(color) enemyChamColor = color end
 })
-
 ESPColorsSection:AddColorpicker("TeamChamsColor", {
     Title = "Team Chams",
     Default = teamChamColor,
-    Callback = function(color)
-        teamChamColor = color
-    end
+    Callback = function(color) teamChamColor = color end
 })
-
 ESPColorsSection:AddColorpicker("ValveEspColor", {
     Title = "Valve ESP",
     Default = valveEspColor,
-    Callback = function(color)
-        valveEspColor = color
-    end
+    Callback = function(color) valveEspColor = color end
 })
-
 ESPColorsSection:AddColorpicker("PuzzleNumberEspColor", {
     Title = "Cube Puzzle ESP",
     Default = puzzleNumberEspColor,
-    Callback = function(color)
-        puzzleNumberEspColor = color
-    end
+    Callback = function(color) puzzleNumberEspColor = color end
 })
-
 ESPColorsSection:AddColorpicker("PuzzleObjectEspColor", {
-    Title = "Code Puzzle ESP",
+    Title = "Code Puzzle (Label)",
     Default = puzzleEspColor,
-    Callback = function(color)
-        puzzleEspColor = color
-    end
+    Callback = function(color) puzzleEspColor = color end
 })
 
--- Player Tab with Noclip
+-- =======================
+-- Player Tab (inkl. Noclip)
+-- =======================
 local PlayerMovementSection = Tabs.Player:AddSection("Movement")
 
 PlayerMovementSection:AddSlider("WalkSpeedSlider", {
     Title = "Walk Speed",
-    Default = 16,
-    Min = 16,
-    Max = 45,
-    Rounding = 0,
+    Default = 16, Min = 16, Max = 45, Rounding = 0,
     Callback = function(value)
         currentSpeed = value
-        local char = Players.LocalPlayer.Character
-        if char and char:FindFirstChild("Humanoid") then
-            char.Humanoid.WalkSpeed = currentSpeed
-        end
-        
+        local c = Players.LocalPlayer.Character
+        local h = c and c:FindFirstChild("Humanoid")
+        if h then h.WalkSpeed = currentSpeed end
         if value ~= 16 then
             if speedLoop then task.cancel(speedLoop) end
             speedLoop = task.spawn(function()
                 while currentSpeed ~= 16 do
-                    local c = Players.LocalPlayer.Character
-                    if c and c:FindFirstChild("Humanoid") then
-                        c.Humanoid.WalkSpeed = currentSpeed
-                    end
+                    local cc = Players.LocalPlayer.Character
+                    local hh = cc and cc:FindFirstChild("Humanoid")
+                    if hh then hh.WalkSpeed = currentSpeed end
                     task.wait(0.1)
                 end
             end)
         else
-            if speedLoop then
-                task.cancel(speedLoop)
-                speedLoop = nil
-            end
+            if speedLoop then task.cancel(speedLoop); speedLoop=nil end
         end
     end
 })
-
 PlayerMovementSection:AddButton({
     Title = "Reset Speed",
     Callback = function()
         currentSpeed = 16
-        local char = Players.LocalPlayer.Character
-        if char and char:FindFirstChild("Humanoid") then
-            char.Humanoid.WalkSpeed = 16
-        end
-        if speedLoop then
-            task.cancel(speedLoop)
-            speedLoop = nil
-        end
+        local c = Players.LocalPlayer.Character
+        local h = c and c:FindFirstChild("Humanoid")
+        if h then h.WalkSpeed = 16 end
+        if speedLoop then task.cancel(speedLoop); speedLoop=nil end
     end
 })
-
 PlayerMovementSection:AddToggle("FlyToggle", {
     Title = "Fly (Local)",
     Default = false,
-    Callback = function(state)
-        if state then
-            enableFly()
-        else
-            disableFly()
-        end
-    end
+    Callback = function(state) if state then enableFly() else disableFly() end end
 })
-
 PlayerMovementSection:AddSlider("FlySpeedSlider", {
     Title = "Fly Speed",
-    Default = 50,
-    Min = 1,
-    Max = 200,
-    Rounding = 0,
-    Callback = function(value)
-        flySpeed = value
-    end
+    Default = 50, Min = 1, Max = 200, Rounding = 0,
+    Callback = function(value) flySpeed = value end
 })
-
--- Noclip Toggle hinzugefügt
 PlayerMovementSection:AddToggle("NoclipToggle", {
     Title = "Noclip",
     Default = false,
-    Callback = function(state)
-        if state then
-            enableNoclip()
-        else
-            disableNoclip()
-        end
-    end
+    Callback = function(state) if state then enableNoclip() else disableNoclip() end end
 })
 
 local PlayerUtilitySection = Tabs.Player:AddSection("Utility")
-
 PlayerUtilitySection:AddToggle("AntiAFKToggle", {
     Title = "Anti-AFK",
     Default = false,
-    Callback = function(state)
-        if state then
-            enableAntiAfk()
-        else
-            disableAntiAfk()
-        end
-    end
+    Callback = function(state) if state then enableAntiAfk() else disableAntiAfk() end end
 })
 
+-- =======================
+-- Auto Tab
+-- =======================
 local AutoSection = Tabs.Auto:AddSection("Auto Features")
-
 AutoSection:AddToggle("AutoCollectCoins", {
     Title = "Auto Collect Coins",
     Default = false,
@@ -997,12 +955,10 @@ AutoSection:AddToggle("AutoCollectCoins", {
             if autoCollectCoinsThread then task.cancel(autoCollectCoinsThread) end
             autoCollectCoinsThread = task.spawn(autoCollectCoinsFunc)
         else
-            if autoCollectCoinsThread then task.cancel(autoCollectCoinsThread) end
-            autoCollectCoinsThread = nil
+            if autoCollectCoinsThread then task.cancel(autoCollectCoinsThread); autoCollectCoinsThread=nil end
         end
     end
 })
-
 AutoSection:AddToggle("AutoDeletePeels", {
     Title = "Auto Delete Peels",
     Default = false,
@@ -1012,12 +968,10 @@ AutoSection:AddToggle("AutoDeletePeels", {
             if autoDeletePeelsThread then task.cancel(autoDeletePeelsThread) end
             autoDeletePeelsThread = task.spawn(autoDeletePeelsFunc)
         else
-            if autoDeletePeelsThread then task.cancel(autoDeletePeelsThread) end
-            autoDeletePeelsThread = nil
+            if autoDeletePeelsThread then task.cancel(autoDeletePeelsThread); autoDeletePeelsThread=nil end
         end
     end
 })
-
 AutoSection:AddToggle("AutoDeleteLockers", {
     Title = "Auto Delete Lockers",
     Default = false,
@@ -1027,12 +981,10 @@ AutoSection:AddToggle("AutoDeleteLockers", {
             if autoDeleteLockersThread then task.cancel(autoDeleteLockersThread) end
             autoDeleteLockersThread = task.spawn(autoDeleteLockersFunc)
         else
-            if autoDeleteLockersThread then task.cancel(autoDeleteLockersThread) end
-            autoDeleteLockersThread = nil
+            if autoDeleteLockersThread then task.cancel(autoDeleteLockersThread); autoDeleteLockersThread=nil end
         end
     end
 })
-
 AutoSection:AddToggle("AutoKill", {
     Title = "Auto Kill",
     Default = false,
@@ -1042,212 +994,123 @@ AutoSection:AddToggle("AutoKill", {
             if autoKillThread then task.cancel(autoKillThread) end
             autoKillThread = task.spawn(autoKillFunc)
         else
-            if autoKillThread then task.cancel(autoKillThread) end
-            autoKillThread = nil
+            if autoKillThread then task.cancel(autoKillThread); autoKillThread=nil end
         end
     end
 })
-
 AutoSection:AddToggle("AntiKickBypass", {
     Title = "Anti Kick Bypass",
     Default = false,
-    Callback = function(state)
-        if state then
-            startAntiKick()
-        else
-            stopAntiKick()
-        end
-    end
+    Callback = function(state) if state then startAntiKick() else stopAntiKick() end end
 })
 
+-- =======================
+-- Visual Tab
+-- =======================
 local VisualSection = Tabs.Visual
-
 VisualSection:AddToggle("FullbrightToggle", {
-    Title = "Fullbright",
-    Default = false,
-    Callback = function(state)
+    Title="Fullbright", Default=false,
+    Callback=function(state)
         fullbrightActive = state
         if state then
             Lighting.Brightness = 2
             Lighting.ClockTime = 14
             Lighting.FogEnd = 100000
             Lighting.GlobalShadows = false
-            Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
+            Lighting.OutdoorAmbient = Color3.fromRGB(128,128,128)
         else
             Lighting.Brightness = 1
             Lighting.ClockTime = 14
             Lighting.FogEnd = 1000
             Lighting.GlobalShadows = true
-            Lighting.OutdoorAmbient = Color3.fromRGB(70, 70, 70)
+            Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
         end
     end
 })
-
 VisualSection:AddToggle("NoFogToggle", {
-    Title = "No Fog",
-    Default = false,
-    Callback = function(state)
+    Title="No Fog", Default=false,
+    Callback=function(state)
         noFogActive = state
         if state then
             if noFogLoop then task.cancel(noFogLoop) end
-            noFogLoop = task.spawn(noFogLoopFunction)
+            noFogLoop = task.spawn(function()
+                while noFogActive do
+                    Lighting.FogStart = 0
+                    Lighting.FogEnd = 1e9
+                    task.wait(1)
+                end
+            end)
         else
-            if noFogLoop then task.cancel(noFogLoop) end
-            noFogLoop = nil
+            if noFogLoop then task.cancel(noFogLoop); noFogLoop=nil end
             Lighting.FogStart = 0
             Lighting.FogEnd = 1000
         end
     end
 })
-
 VisualSection:AddToggle("ColorCorrectionToggle", {
-    Title = "Color Correction",
-    Default = false,
-    Callback = function(state)
+    Title="Color Correction", Default=false,
+    Callback=function(state)
         ccActive = state
-        if state then
-            enableColorCorrection()
-        else
-            disableColorCorrection()
-        end
+        if state then enableColorCorrection() else disableColorCorrection() end
     end
 })
-
 VisualSection:AddSlider("BrightnessSlider", {
-    Title = "Brightness",
-    Default = 0,
-    Min = -1,
-    Max = 1,
-    Rounding = 2,
-    Callback = function(value)
-        ccBrightness = value
-        if ccActive and ccEffect then
-            ccEffect.Brightness = value
-        end
-    end
+    Title="Brightness", Default=0, Min=-1, Max=1, Rounding=2,
+    Callback=function(value) ccBrightness=value; if ccActive and ccEffect then ccEffect.Brightness=value end end
 })
-
 VisualSection:AddSlider("ContrastSlider", {
-    Title = "Contrast",
-    Default = 0,
-    Min = -2,
-    Max = 2,
-    Rounding = 2,
-    Callback = function(value)
-        ccContrast = value
-        if ccActive and ccEffect then
-            ccEffect.Contrast = value
-        end
-    end
+    Title="Contrast", Default=0, Min=-2, Max=2, Rounding=2,
+    Callback=function(value) ccContrast=value; if ccActive and ccEffect then ccEffect.Contrast=value end end
 })
-
 VisualSection:AddSlider("SaturationSlider", {
-    Title = "Saturation",
-    Default = 1,
-    Min = 0,
-    Max = 3,
-    Rounding = 2,
-    Callback = function(value)
-        ccSaturation = value
-        if ccActive and ccEffect then
-            ccEffect.Saturation = value
-        end
-    end
+    Title="Saturation", Default=1, Min=0, Max=3, Rounding=2,
+    Callback=function(value) ccSaturation=value; if ccActive and ccEffect then ccEffect.Saturation=value end end
 })
-
 VisualSection:AddToggle("SunRaysToggle", {
-    Title = "Sun Rays",
-    Default = false,
-    Callback = function(state)
-        sunRaysActive = state
-        if state then
-            enableSunRays()
-        else
-            disableSunRays()
-        end
-    end
+    Title="Sun Rays", Default=false,
+    Callback=function(state) sunRaysActive=state; if state then enableSunRays() else disableSunRays() end end
 })
-
 VisualSection:AddSlider("SunRaysIntensitySlider", {
-    Title = "Sun Rays Intensity",
-    Default = 0.3,
-    Min = 0,
-    Max = 1,
-    Rounding = 2,
-    Callback = function(value)
-        sunRaysIntensity = value
-        if sunRaysActive and sunRaysEffect then
-            sunRaysEffect.Intensity = value
-        end
-    end
+    Title="Sun Rays Intensity", Default=0.3, Min=0, Max=1, Rounding=2,
+    Callback=function(value) sunRaysIntensity=value; if sunRaysActive and sunRaysEffect then sunRaysEffect.Intensity=value end end
 })
 
 local LightingSection = Tabs.Visual:AddSection("Lighting Controls")
-
 LightingSection:AddSlider("ClockTimeSlider", {
-    Title = "Time of Day",
-    Default = 0,
-    Min = 0,
-    Max = 24,
-    Rounding = 1,
-    Callback = function(value)
-        Lighting.ClockTime = value
-    end
+    Title="Time of Day", Default=0, Min=0, Max=24, Rounding=1,
+    Callback=function(value) Lighting.ClockTime = value end
 })
-
 LightingSection:AddSlider("ExposureSlider", {
-    Title = "Exposure",
-    Default = 0,
-    Min = -3,
-    Max = 3,
-    Rounding = 2,
-    Callback = function(value)
-        Lighting.ExposureCompensation = value
-    end
+    Title="Exposure", Default=0, Min=-3, Max=3, Rounding=2,
+    Callback=function(value) Lighting.ExposureCompensation = value end
 })
-
 LightingSection:AddToggle("ShadowsToggle", {
-    Title = "Shadows",
-    Default = true,
-    Callback = function(state)
-        Lighting.GlobalShadows = state
-    end
+    Title="Shadows", Default=true,
+    Callback=function(state) Lighting.GlobalShadows = state end
 })
 
 local UtilitySection = Tabs.Visual:AddSection("Utility")
-
 UtilitySection:AddButton({
-    Title = "Reset All Visual",
-    Callback = function()
+    Title="Reset All Visual",
+    Callback=function()
         Lighting.Brightness = 1
         Lighting.ClockTime = 14
         Lighting.FogStart = 0
         Lighting.FogEnd = 1000
         Lighting.GlobalShadows = true
-        Lighting.OutdoorAmbient = Color3.fromRGB(70, 70, 70)
+        Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
         Lighting.ExposureCompensation = 0
-        
-        if ccEffect then ccEffect:Destroy(); ccEffect = nil end
-        if sunRaysEffect then sunRaysEffect:Destroy(); sunRaysEffect = nil end
-        
-        ccActive = false
-        sunRaysActive = false
-        fullbrightActive = false
-        
-        if noFogLoop then
-            task.cancel(noFogLoop)
-            noFogLoop = nil
-            noFogActive = false
-        end
-        
-        Fluent:Notify({
-            Title = "Visual Reset",
-            Content = "All visual settings reset to default",
-            Duration = 3
-        })
+        if ccEffect then ccEffect:Destroy(); ccEffect=nil end
+        if sunRaysEffect then sunRaysEffect:Destroy(); sunRaysEffect=nil end
+        ccActive=false; sunRaysActive=false; fullbrightActive=false
+        if noFogLoop then task.cancel(noFogLoop); noFogLoop=nil; noFogActive=false end
+        Fluent:Notify({ Title="Visual Reset", Content="All visual settings reset to default", Duration=3 })
     end
 })
 
+-- =======================
+-- Save/Interface
+-- =======================
 SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
 SaveManager:IgnoreThemeSettings()
@@ -1258,9 +1121,11 @@ InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
+-- =======================
+-- Mobile GUI Toggle
+-- =======================
 local function createMobileGUIButton()
     if not isMobile then return end
-    
     local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
     local mobileGui = Instance.new("ScreenGui")
     mobileGui.Name = "MobileGUIToggle"
@@ -1278,75 +1143,47 @@ local function createMobileGUIButton()
     toggleButton.Font = Enum.Font.GothamBold
     toggleButton.BorderSizePixel = 0
     toggleButton.Parent = mobileGui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 30)
-    corner.Parent = toggleButton
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(100, 100, 100)
-    stroke.Thickness = 2
-    stroke.Parent = toggleButton
+    local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0,30); corner.Parent = toggleButton
+    local stroke = Instance.new("UIStroke"); stroke.Color = Color3.fromRGB(100,100,100); stroke.Thickness = 2; stroke.Parent = toggleButton
 
     toggleButton.MouseButton1Click:Connect(function()
         isGuiVisible = not isGuiVisible
-        if Window and Window.Root then
-            Window.Root.Visible = isGuiVisible
-        end
+        if Window and Window.Root then Window.Root.Visible = isGuiVisible end
         toggleButton.Text = isGuiVisible and "🎮" or "📱"
-        toggleButton.BackgroundColor3 = isGuiVisible and Color3.fromRGB(30, 30, 30) or Color3.fromRGB(60, 60, 60)
+        toggleButton.BackgroundColor3 = isGuiVisible and Color3.fromRGB(30,30,30) or Color3.fromRGB(60,60,60)
     end)
 
-    local dragging = false
-    local dragStart = nil
-    local startPos = nil
-
+    local dragging, dragStart, startPos = false, nil, nil
     toggleButton.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = toggleButton.Position
+            dragging = true; dragStart = input.Position; startPos = toggleButton.Position
         end
     end)
-
     toggleButton.InputChanged:Connect(function(input)
         if dragging and input.UserInputType == Enum.UserInputType.Touch then
             local delta = input.Position - dragStart
             toggleButton.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
     end)
-
     toggleButton.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
+        if input.UserInputType == Enum.UserInputType.Touch then dragging = false end
     end)
 end
 
+-- =======================
+-- Chat Commands
+-- =======================
 local function setupChatCommands()
     local function onChatted(message)
         local msg = message:lower()
         if msg == "/gui" or msg == "/menu" or msg == "/toggle" then
             isGuiVisible = not isGuiVisible
-            if Window and Window.Root then
-                Window.Root.Visible = isGuiVisible
-            end
-            
-            local statusText = isGuiVisible and "opened" or "closed"
-            Fluent:Notify({
-                Title = "GUI Toggle",
-                Content = "Menu " .. statusText .. " via chat command",
-                Duration = 2
-            })
+            if Window and Window.Root then Window.Root.Visible = isGuiVisible end
+            Fluent:Notify({ Title="GUI Toggle", Content="Menu "..(isGuiVisible and "opened" or "closed").." via chat command", Duration=2 })
         elseif msg == "/help" then
-            Fluent:Notify({
-                Title = "Chat Commands",
-                Content = "/gui, /menu, /toggle - Toggle GUI\n/help - Show this help",
-                Duration = 5
-            })
+            Fluent:Notify({ Title="Chat Commands", Content="/gui, /menu, /toggle - Toggle GUI\n/help - Show this help", Duration=5 })
         end
     end
-
     if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
         TextChatService.MessageReceived:Connect(function(textChatMessage)
             if textChatMessage.TextSource and textChatMessage.TextSource.UserId == Players.LocalPlayer.UserId then
@@ -1358,46 +1195,25 @@ local function setupChatCommands()
     end
 end
 
-if isMobile then
-    task.wait(2)
-    createMobileGUIButton()
-    setupChatCommands()
-else
-    setupChatCommands()
-end
+if isMobile then task.wait(2); createMobileGUIButton(); setupChatCommands() else setupChatCommands() end
 
--- Character respawn handling including noclip
+-- =======================
+-- Character Respawn Handling
+-- =======================
 Players.LocalPlayer.CharacterAdded:Connect(function(character)
     character:WaitForChild("HumanoidRootPart")
     task.wait(0.5)
-    
     if speedLoop and currentSpeed ~= 16 then
         local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid.WalkSpeed = currentSpeed
-        end
+        if humanoid then humanoid.WalkSpeed = currentSpeed end
     end
-    
-    if flyActive then
-        task.wait(0.5)
-        disableFly()
-        task.wait(0.5)
-        enableFly()
-    end
-    
-    -- Re-enable noclip after respawn
-    if noclipActive then
-        task.wait(0.5)
-        disableNoclip()
-        task.wait(0.5)
-        enableNoclip()
-    end
+    if flyActive then task.wait(0.5); disableFly(); task.wait(0.5); enableFly() end
+    if noclipActive then task.wait(0.5); disableNoclip(); task.wait(0.5); enableNoclip() end
 end)
 
-Fluent:Notify({
-    Title = "Banana Eats Script",
-    Content = "Script loaded successfully!",
-    Duration = 4
-})
+-- Hook existing + future players for ESP features
+Players.PlayerAdded:Connect(function(p) if p ~= Players.LocalPlayer then hookPlayer(p) end end)
+for _, p in ipairs(Players:GetPlayers()) do if p ~= Players.LocalPlayer then hookPlayer(p) end end
 
+Fluent:Notify({ Title="Banana Eats Script", Content="Script loaded successfully!", Duration=4 })
 Window:SelectTab(1)
