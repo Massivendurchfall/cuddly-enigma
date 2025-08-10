@@ -8,6 +8,7 @@ local Players = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
 local Lighting = game:GetService("Lighting")
 local TextChatService = game:GetService("TextChatService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 local isGuiVisible = true
@@ -434,12 +435,15 @@ end
 
 local comboParagraph
 local comboLoop = nil
+local comboCurrentCode = nil
+
 local function startComboWatcher()
     if comboLoop then task.cancel(comboLoop) end
     comboLoop = task.spawn(function()
         while true do
             local code = nil
             pcall(function() code = readCombinationCode() end)
+            comboCurrentCode = code
             if comboParagraph then
                 comboParagraph:SetDesc(code and code or "—")
             end
@@ -710,13 +714,59 @@ local function autoKillFunc()
     end
 end
 
+local function sendChatMessage(msg)
+    local ok = false
+    pcall(function()
+        if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+            local channels = TextChatService:FindFirstChild("TextChannels")
+            local general = channels and channels:FindFirstChild("RBXGeneral")
+            if general then general:SendAsync(msg); ok = true end
+        end
+    end)
+    if not ok then
+        pcall(function()
+            local say = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents") and ReplicatedStorage.DefaultChatSystemChatEvents:FindFirstChild("SayMessageRequest")
+            if say then say:FireServer(msg, "All"); ok = true end
+        end)
+    end
+    return ok
+end
+
+local autoChatComboActive = false
+local autoChatThread = nil
+local lastSentCombo = nil
+
+local function startAutoChatCombo()
+    if autoChatThread then task.cancel(autoChatThread) end
+    autoChatThread = task.spawn(function()
+        if comboCurrentCode and comboCurrentCode ~= lastSentCombo then
+            sendChatMessage(tostring(comboCurrentCode))
+            lastSentCombo = comboCurrentCode
+        end
+        while autoChatComboActive do
+            if comboCurrentCode and comboCurrentCode ~= lastSentCombo then
+                sendChatMessage(tostring(comboCurrentCode))
+                lastSentCombo = comboCurrentCode
+            end
+            task.wait(0.4)
+        end
+    end)
+end
+
 local ESPSection = Tabs.ESP:AddSection("ESP Toggles")
 
 local ComboCodeSection = Tabs.ESP:AddSection("Combination Puzzle")
 local comboUI = ComboCodeSection:AddParagraph({ Title = "Combination Code", Content = "—" })
-local comboParagraphRef = comboUI
-comboParagraph = comboParagraphRef
-startComboWatcher()
+comboParagraph = comboUI
+
+ComboCodeSection:AddToggle("AutoChatComboToggle", {
+    Title = "Auto Chat Combination Code",
+    Default = false,
+    Callback = function(state)
+        autoChatComboActive = state
+        if state then startAutoChatCombo() else if autoChatThread then task.cancel(autoChatThread); autoChatThread=nil end end
+    end
+})
 
 local ESPColorsSection = Tabs.ESP:AddSection("ESP Colors")
 
@@ -1207,3 +1257,5 @@ for _, p in ipairs(Players:GetPlayers()) do if p ~= Players.LocalPlayer then hoo
 
 Fluent:Notify({ Title="Banana Eats Script", Content="Loaded", Duration=4 })
 Window:SelectTab(1)
+
+startComboWatcher()
