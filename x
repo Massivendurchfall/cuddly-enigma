@@ -1186,7 +1186,7 @@ local LightingSection = Tabs.Visual:AddSection("Lighting Controls")
 
 LightingSection:AddSlider("ClockTimeSlider", {
     Title = "Time of Day",
-    Default = 14,
+    Default = 0,
     Min = 0,
     Max = 24,
     Rounding = 1,
