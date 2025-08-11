@@ -743,7 +743,7 @@ local autoChatWatcher = nil
 local lastSentCombo = nil
 local lastObservedCombo = nil
 local scheduleToken = 0
-local chatDelaySeconds = 20
+local chatDelaySeconds = 30
 
 local function scheduleDelayedSend(code)
     scheduleToken = scheduleToken + 1
