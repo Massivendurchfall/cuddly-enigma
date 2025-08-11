@@ -1,559 +1,348 @@
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
-local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+-- Grow a Garden Loader — redeem-first, uses syn.request/http_request/request (no direct HttpService)
+-- GUI cleaned: proper layout (UIListLayout + UIPadding), readable spacing, no overlaps
+
+-- === CONFIG ===
+local API_BASE        = "https://long-recipe-73e0.dosrobert69.workers.dev/api"
+local WORKINK_LINK    = "https://workink.net/22K7/b5on27ny"
+local MAIN_SCRIPT_URL = "https://raw.githubusercontent.com/Massivendurchfall/cuddly-enigma/refs/heads/main/y" -- anpassen!
+local LICENSE_HOURS   = 8
+local SAVE_FILENAME   = "gag_key.txt"
+-- === END CONFIG ===
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local Workspace = game:GetService("Workspace")
-local VoiceChatService = game:GetService("VoiceChatService")
+local USER_ID = Players.LocalPlayer and Players.LocalPlayer.UserId or 0
+local CAN_FS  = (typeof(isfile)=="function" and typeof(writefile)=="function" and typeof(readfile)=="function")
 
-local LocalPlayer = Players.LocalPlayer
+getgenv().GROW_A_GARDEN = getgenv().GROW_A_GARDEN or {}
+local G = getgenv().GROW_A_GARDEN
 
--- Movement wieder aktivieren
-local function reEnableMovement()
-    local char = LocalPlayer.Character
-    if char then
-        local root = char:FindFirstChild("HumanoidRootPart")
-        local hum  = char:FindFirstChild("Humanoid")
-        if root then root.Anchored = false end
-        if hum then
-            hum.PlatformStand = false
-            hum.Sit = false
-        end
+-- ---------- Tiny JSON helpers (no HttpService) ----------
+local function esc(s) s=tostring(s or "") s=s:gsub('\\','\\\\'):gsub('"','\\"'):gsub('\n','\\n'):gsub('\r','\\r'):gsub('\t','\\t'); return '"'..s..'"' end
+local function json_encode(t)
+    local p = {}
+    for k,v in pairs(t or {}) do
+        local tv = typeof(v)
+        local val = (tv=="string" and esc(v)) or (tv=="number" and tostring(v)) or (tv=="boolean" and (v and "true" or "false")) or "null"
+        p[#p+1] = esc(k)..":"..val
     end
+    return "{"..table.concat(p,",").."}"
+end
+local function soft_parse(body)
+    local o = {}
+    if type(body)~="string" then return o end
+    o.ok          = body:find('\"ok\"%s*:%s*true') ~= nil
+    o.error       = body:match('\"error\"%s*:%s*\"([^\"]+)\"')
+    o.license_key = body:match('\"license_key\"%s*:%s*\"([0-9a-fA-F%-]+)\"')
+    return o
 end
 
--- Ring-Koordinaten
-local collectCoords = {
-    Vector3.new(3510.47, 177.41, 1198.01),
-    Vector3.new(3432.29, 155.51, 1137.61),
-    Vector3.new(3476.75, -126.64, 968.31),
-    Vector3.new(3346.27, -106.83, 1133.09)
+-- ---------- HTTP requester pick ----------
+local function pickRequester()
+    if syn and typeof(syn.request)=="function" then return syn.request end
+    if http and typeof(http.request)=="function" then return http.request end
+    if typeof(http_request)=="function" then return http_request end
+    if typeof(request)=="function" then return request end
+    return nil
+end
+local REQ = pickRequester()
+
+local COMMON_HEADERS = {
+    ["Content-Type"] = "application/json",
+    ["User-Agent"]   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
--- Status-Variablen
-local autoCollectActive     = false
-local autoCollectTask
-local undergroundActive     = false
-local undergroundTask
-
--- Auto-Collect Ringe
-local function autoCollectMoney()
-    enableFly()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
-    if not root then return end
-    for _, coord in ipairs(collectCoords) do
-        root.CFrame = CFrame.new(coord)
-        reEnableMovement()
-        task.wait(0.05)
-        root.CFrame = root.CFrame + Vector3.new(0, -3, 0)
-        task.wait(0.1)
-        root.CFrame = root.CFrame + Vector3.new(0, 6, 0)
-        task.wait(0.5)
-    end
+local function httpReqJson(url, method, bodyTbl)
+    if not REQ then return nil, "no_http_available" end
+    local bodyStr = bodyTbl and json_encode(bodyTbl) or nil
+    local ok, r = pcall(REQ, { Url=url, Method=method, Headers=COMMON_HEADERS, Body=bodyStr })
+    if not ok or not r then return nil, "request_failed" end
+    local status = r.StatusCode or r.Status or 0
+    local body   = r.Body or ""
+    local parsed = soft_parse(body)
+    return { status=status, body=body, json=parsed }
 end
 
--- Auto-Collect unterirdische Ringe
-local function collectUnderground()
-    enableFly()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
-    if not root then return end
-    for i = 3, 4 do
-        root.CFrame = CFrame.new(collectCoords[i])
-        reEnableMovement()
-        task.wait(0.05)
-        root.CFrame = root.CFrame + Vector3.new(0, -3, 0)
-        task.wait(0.1)
-        root.CFrame = root.CFrame + Vector3.new(0, 6, 0)
-        task.wait(0.5)
+local function urlEncode(s) s=tostring(s or "") return (s:gsub("([^%w%-_%.~])", function(c) return string.format("%%%02X", string.byte(c)) end)) end
+
+-- ---------- API wrappers (redeem first) ----------
+local function redeemToken(tok)
+    local r = httpReqJson(API_BASE.."/redeem_workink.php","POST",{workink_token=tok,roblox_user_id=USER_ID,license_days=LICENSE_DAYS})
+    if r and r.status>=200 and r.json and r.json.ok and r.json.license_key then return r.json.license_key,nil end
+    local url = ("%s/redeem_workink.php?workink_token=%s&roblox_user_id=%d&license_days=%d"):format(API_BASE, urlEncode(tok), USER_ID, LICENSE_DAYS)
+    r = httpReqJson(url,"GET")
+    if r and r.status>=200 and r.json and r.json.ok and r.json.license_key then return r.json.license_key,nil end
+    local err = (r and r.json and r.json.error) or (r and ("http_"..r.status)) or "network_error"
+    if r and r.status==200 and (not r.json or (not r.json.ok and not r.json.error)) then
+        err = "http_200 body_snip="..string.sub(r.body or "",1,120)
     end
+    return nil, err
 end
 
--- Kamera zurücksetzen beim Respawn
-LocalPlayer.CharacterAdded:Connect(function(char)
-    task.wait(1)
-    local hum = char:WaitForChild("Humanoid", 5)
-    if hum then
-        Workspace.CurrentCamera.CameraSubject = hum
-        Workspace.CurrentCamera.CameraType   = Enum.CameraType.Custom
+local function validateLicense(key)
+    local r = httpReqJson(API_BASE.."/validate.php","POST",{license_key=key,roblox_user_id=USER_ID})
+    if r and r.status>=200 and r.json and r.json.ok then return true,"valid" end
+    local url = ("%s/validate.php?license_key=%s&roblox_user_id=%d"):format(API_BASE, urlEncode(key), USER_ID)
+    r = httpReqJson(url,"GET")
+    if r and r.status>=200 and r.json and r.json.ok then return true,"valid" end
+    local err = (r and r.json and r.json.error) or (r and ("http_"..r.status)) or "network_error"
+    if r and r.status==200 and (not r.json or (not r.json.ok and not r.json.error)) then
+        err = "http_200 body_snip="..string.sub(r.body or "",1,120)
+    end
+    return false, err
+end
+
+-- ---------- Key cache ----------
+local function loadCachedKey()
+    if type(G.LICENSE_KEY)=="string" and #G.LICENSE_KEY>0 then return G.LICENSE_KEY end
+    if CAN_FS and isfile(SAVE_FILENAME) then
+        local ok, content = pcall(readfile, SAVE_FILENAME)
+        if ok and type(content)=="string" and #content>0 then return (content:gsub("%s+$","")) end
+    end
+    return nil
+end
+local function saveCachedKey(k) G.LICENSE_KEY=k; if CAN_FS then pcall(writefile, SAVE_FILENAME, k) end end
+
+-- ---------- UI ----------
+local function createUI()
+    local g=Instance.new("ScreenGui")
+    g.Name="GAGKeyGate"
+    g.ResetOnSpawn=false
+    if syn and syn.protect_gui then pcall(syn.protect_gui,g) end
+    g.Parent=game.CoreGui
+
+    local f=Instance.new("Frame")
+    f.Size=UDim2.new(0,560,0,0)
+    f.AutomaticSize=Enum.AutomaticSize.Y
+    f.Position=UDim2.new(0.5,-280,0.5,-150)
+    f.BackgroundColor3=Color3.fromRGB(20,20,20)
+    f.Active=true; f.Draggable=true; f.Parent=g
+    Instance.new("UICorner",f).CornerRadius=UDim.new(0,12)
+
+    -- Close Button
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0,28,0,28)
+    closeBtn.Position = UDim2.new(1,-32,0,4)
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 14
+    closeBtn.Parent = f
+    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(1,0)
+    closeBtn.MouseButton1Click:Connect(function() if g then g:Destroy() end end)
+
+    local pad=Instance.new("UIPadding")
+    pad.PaddingTop=UDim.new(0,12); pad.PaddingBottom=UDim.new(0,12)
+    pad.PaddingLeft=UDim.new(0,12); pad.PaddingRight=UDim.new(0,12)
+    pad.Parent=f
+
+    local list=Instance.new("UIListLayout")
+    list.FillDirection=Enum.FillDirection.Vertical
+    list.SortOrder=Enum.SortOrder.LayoutOrder
+    list.Padding=UDim.new(0,10)
+    list.Parent=f
+
+    -- Title
+    local title=Instance.new("TextLabel")
+    title.LayoutOrder=1
+    title.Size=UDim2.new(1,0,0,28)
+    title.Text="Grow a Garden — License Check"
+    title.TextColor3=Color3.new(1,1,1)
+    title.BackgroundTransparency=1
+    title.TextXAlignment=Enum.TextXAlignment.Left
+    title.Font=Enum.Font.GothamBold
+    title.TextSize=20
+    title.Parent=f
+
+    -- Status
+    local status=Instance.new("TextLabel")
+    status.LayoutOrder=2
+    status.Size=UDim2.new(1,0,0,20)
+    status.Text=(REQ and "Paste your license key OR your Work.ink token below.") or "Your executor blocks HTTP."
+    status.TextColor3=Color3.fromRGB(200,200,200)
+    status.BackgroundTransparency=1
+    status.TextXAlignment=Enum.TextXAlignment.Left
+    status.Font=Enum.Font.Gotham
+    status.TextSize=14
+    status.Name="Status"
+    status.Parent=f
+
+    -- Help panel
+    local helpFrame=Instance.new("Frame")
+    helpFrame.LayoutOrder=3
+    helpFrame.Size=UDim2.new(1,0,0,0)
+    helpFrame.AutomaticSize=Enum.AutomaticSize.Y
+    helpFrame.BackgroundColor3=Color3.fromRGB(28,28,28)
+    helpFrame.Parent=f
+    Instance.new("UICorner",helpFrame).CornerRadius=UDim.new(0,8)
+
+    local helpPad=Instance.new("UIPadding")
+    helpPad.PaddingTop=UDim.new(0,10); helpPad.PaddingBottom=UDim.new(0,10)
+    helpPad.PaddingLeft=UDim.new(0,10); helpPad.PaddingRight=UDim.new(0,10)
+    helpPad.Parent=helpFrame
+
+    local help=Instance.new("TextLabel")
+    help.Size=UDim2.new(1,0,0,0)
+    help.AutomaticSize=Enum.AutomaticSize.Y
+    help.TextWrapped=true
+    help.RichText=true
+    help.TextXAlignment=Enum.TextXAlignment.Left
+    help.TextYAlignment=Enum.TextYAlignment.Top
+    help.TextColor3=Color3.fromRGB(220,220,220)
+    help.Font=Enum.Font.Gotham
+    help.TextSize=13
+    help.Parent=helpFrame
+    help.Text = table.concat({
+        "How to get the key:",
+        "\n1) Click <b>Copy Work.ink Link</b>.",
+        "\n2) Open your browser and paste it into the address bar.",
+        "\n3) Complete the steps until you see a <b>token</b>.",
+        "\n4) Paste it below and press <b>Continue</b>."
+    },"")
+
+    -- Input
+    local box=Instance.new("TextBox")
+    box.LayoutOrder=4
+    box.Size=UDim2.new(1,0,0,36)
+    box.PlaceholderText="Paste license key OR Work.ink token here"
+    box.Text=""
+    box.TextColor3=Color3.new(1,1,1)
+    box.BackgroundColor3=Color3.fromRGB(35,35,35)
+    box.ClearTextOnFocus=false
+    box.Font=Enum.Font.Gotham
+    box.TextSize=14
+    Instance.new("UICorner",box).CornerRadius=UDim.new(0,8)
+    box.Parent=f
+
+    -- Buttons row
+    local btnRow=Instance.new("Frame")
+    btnRow.LayoutOrder=5
+    btnRow.Size=UDim2.new(1,0,0,36)
+    btnRow.BackgroundTransparency=1
+    btnRow.Parent=f
+
+    local btnList=Instance.new("UIListLayout")
+    btnList.FillDirection=Enum.FillDirection.Horizontal
+    btnList.HorizontalAlignment=Enum.HorizontalAlignment.Left
+    btnList.VerticalAlignment=Enum.VerticalAlignment.Center
+    btnList.Padding=UDim.new(0,10)
+    btnList.Parent=btnRow
+
+    local go=Instance.new("TextButton")
+    go.Size=UDim2.new(0.45,0,1,0)
+    go.Text="Continue"
+    go.TextColor3=Color3.new(1,1,1)
+    go.BackgroundColor3=Color3.fromRGB(40,100,220)
+    go.Font=Enum.Font.GothamBold
+    go.TextSize=14
+    Instance.new("UICorner",go).CornerRadius=UDim.new(0,8)
+    go.Parent=btnRow
+
+    local clip=Instance.new("TextButton")
+    clip.Size=UDim2.new(0.45,0,1,0)
+    clip.Text="Paste from Clipboard"
+    clip.TextColor3=Color3.new(1,1,1)
+    clip.BackgroundColor3=Color3.fromRGB(60,60,60)
+    clip.Font=Enum.Font.Gotham
+    clip.TextSize=14
+    Instance.new("UICorner",clip).CornerRadius=UDim.new(0,8)
+    clip.Parent=btnRow
+
+    -- Copy Work.ink link
+    local copyLink=Instance.new("TextButton")
+    copyLink.LayoutOrder=6
+    copyLink.Size=UDim2.new(1,0,0,30)
+    copyLink.Text="➡ Copy Work.ink link:  "..WORKINK_LINK
+    copyLink.TextColor3=Color3.fromRGB(220,220,220)
+    copyLink.BackgroundColor3=Color3.fromRGB(45,45,45)
+    copyLink.TextXAlignment=Enum.TextXAlignment.Left
+    copyLink.Font=Enum.Font.Gotham
+    copyLink.TextSize=12
+    Instance.new("UICorner",copyLink).CornerRadius=UDim.new(0,6)
+    copyLink.Parent=f
+
+    copyLink.MouseButton1Click:Connect(function()
+        if typeof(setclipboard)=="function" then
+            pcall(setclipboard, WORKINK_LINK)
+            status.Text="Link copied. Complete steps in your browser."
+        else
+            status.Text="Cannot copy automatically. Manually copy this link."
+        end
+    end)
+
+    clip.MouseButton1Click:Connect(function()
+        if typeof(getclipboard)=="function" then
+            local ok,v=pcall(getclipboard)
+            if ok and type(v)=="string" and #v>0 then
+                box.Text=v; status.Text="Pasted from clipboard."
+            else
+                status.Text="Clipboard is empty."
+            end
+        else
+            status.Text="Your executor does not support getclipboard()."
+        end
+    end)
+
+    return g,status,box,go
+end
+
+local Gui, Status, InputBox, ContinueBtn = createUI()
+
+-- Auto-validate cached key
+task.spawn(function()
+    local ex = loadCachedKey()
+    if ex then
+        Status.Text="Checking saved license key..."
+        local ok, reason = validateLicense(ex)
+        if ok then
+            Status.Text="License valid. Loading main script..."
+            saveCachedKey(ex); task.wait(0.3); if Gui then Gui:Destroy() end
+            local ok2,err2=pcall(function() loadstring(game:HttpGet(MAIN_SCRIPT_URL,true))() end)
+            if not ok2 then warn("Main script error: ",err2) end
+        else
+            Status.Text="Saved key invalid: "..tostring(reason)
+        end
     end
 end)
 
--- Fenster & Tabs
-local Window = Fluent:CreateWindow({
-    Title       = "Voice Ban Bypasser",
-    TabWidth    = 160,
-    Size        = UDim2.fromOffset(580,460),
-    Acrylic     = false,
-    Theme       = "Dark",
-    MinimizeKey = Enum.KeyCode.LeftControl
-})
+ContinueBtn.MouseButton1Click:Connect(function()
+    local text = (InputBox.Text or ""):gsub("^%s+",""):gsub("%s+$","")
+    if text=="" then Status.Text="Input is empty."; return end
+    if not REQ then Status.Text="Cannot contact server."; return end
 
-local Tabs = {
-    Player   = Window:AddTab({Title="Player",   Icon="user"}),
-    Chams    = Window:AddTab({Title="ESP",      Icon="eye"}),
-    Voice    = Window:AddTab({Title="Voice",    Icon="mic"}),
-    Teleport = Window:AddTab({Title="Teleport", Icon="map"}),
-    Spectate = Window:AddTab({Title="Spectate", Icon="camera"}),
-    Info     = Window:AddTab({Title="Info",     Icon="heart"}),
-    Settings = Window:AddTab({Title="Settings", Icon="settings"})
-}
-
--- Grundwerte für Speed & Fly
-local currentSpeed = 16
-local flySpeed     = 50
-local flyBodyVelocity, flyBodyGyro, flyConnection
-
--- Hilfsfunktionen
-local function getRootPart(char)
-    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
-    if not root then pcall(function() root = char:WaitForChild("HumanoidRootPart",5) end) end
-    return root
-end
-
-local function setWalkSpeed(speed)
-    local char = LocalPlayer.Character
-    if char and char:FindFirstChild("Humanoid") then
-        char.Humanoid.WalkSpeed = speed
-    end
-end
-
--- Fly aktivieren / deaktivieren
-function enableFly()
-    local char = LocalPlayer.Character
-    if char and char:FindFirstChild("HumanoidRootPart") then
-        local root = char.HumanoidRootPart
-        if not flyBodyVelocity then
-            flyBodyVelocity = Instance.new("BodyVelocity", root)
-            flyBodyVelocity.MaxForce = Vector3.new(1e5,1e5,1e5)
+    Status.Text = "Redeeming your token..."
+    local lic, err = redeemToken(text)
+    if lic then
+        InputBox.Text = lic
+        Status.Text = "Your license key: "..lic
+        if typeof(setclipboard)=="function" then pcall(setclipboard, lic) end
+        saveCachedKey(lic); task.wait(0.6)
+        Status.Text="Validating license..."
+        local ok, reason = validateLicense(lic)
+        if ok then
+            Status.Text="License valid. Loading main script..."
+            task.wait(0.3); if Gui then Gui:Destroy() end
+            local ok2,err2=pcall(function() loadstring(game:HttpGet(MAIN_SCRIPT_URL,true))() end)
+            if not ok2 then warn("Main script error: ",err2) end
+        else
+            Status.Text="Validation failed: "..tostring(reason)
         end
-        if not flyBodyGyro then
-            flyBodyGyro = Instance.new("BodyGyro", root)
-            flyBodyGyro.MaxTorque = Vector3.new(1e5,1e5,1e5)
-        end
-        flyBodyGyro.CFrame = root.CFrame
-        if not flyConnection then
-            flyConnection = RunService.RenderStepped:Connect(function()
-                local dir = Vector3.new()
-                if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += Workspace.CurrentCamera.CFrame.LookVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= Workspace.CurrentCamera.CFrame.LookVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= Workspace.CurrentCamera.CFrame.RightVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += Workspace.CurrentCamera.CFrame.RightVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.new(0,1,0) end
-                if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir -= Vector3.new(0,1,0) end
-                flyBodyVelocity.Velocity = (dir.Magnitude>0 and dir.Unit*flySpeed) or Vector3.new()
-                flyBodyGyro.CFrame      = Workspace.CurrentCamera.CFrame
-            end)
-        end
-    end
-end
-
-local function disableFly()
-    if flyBodyVelocity then flyBodyVelocity:Destroy() flyBodyVelocity=nil end
-    if flyBodyGyro    then flyBodyGyro:Destroy()    flyBodyGyro=nil    end
-    if flyConnection  then flyConnection:Disconnect() flyConnection=nil end
-end
-
--- Noclip aktivieren / deaktivieren
-local noclipConn
-local function enableNoclip()
-    noclipConn = RunService.Stepped:Connect(function()
-        local char = LocalPlayer.Character
-        if char then
-            for _,p in ipairs(char:GetDescendants()) do
-                if p:IsA("BasePart") then p.CanCollide = false end
-            end
-        end
-    end)
-end
-
-local function disableNoclip()
-    if noclipConn then noclipConn:Disconnect() noclipConn=nil end
-end
-
--- Teleport & Spectate
-local function TeleportToPlayer(plr)
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local root = getRootPart(char)
-    local tgt  = getRootPart(plr.Character or plr.CharacterAdded:Wait())
-    if root and tgt then
-        root.CFrame = tgt.CFrame
-        reEnableMovement()
-    end
-end
-
-local function SpectatePlayer(plr)
-    local char = plr.Character or plr.CharacterAdded:Wait()
-    local hum  = char:FindFirstChild("Humanoid")
-    if hum then
-        Workspace.CurrentCamera.CameraSubject = hum
-        Workspace.CurrentCamera.CameraType   = Enum.CameraType.Custom
-    end
-end
-
-local function StopSpectating()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local hum  = char:FindFirstChild("Humanoid")
-    if hum then
-        Workspace.CurrentCamera.CameraSubject = hum
-        Workspace.CurrentCamera.CameraType   = Enum.CameraType.Custom
-        reEnableMovement()
-    end
-end
-
--- Player Tab
-do
-    local sec = Tabs.Player:AddSection("Player Controls")
-    sec:AddSlider("SpeedSlider", {Title="Walk Speed",Default=16,Min=0,Max=150,Rounding=0})
-       :OnChanged(function(v) setWalkSpeed(v) end)
-    sec:AddToggle("FlyToggle", {Title="Fly",Default=false})
-       :OnChanged(function(s) if s then enableFly() else disableFly() end end)
-    sec:AddSlider("FlySpeedSlider", {Title="Fly Speed",Default=50,Min=0,Max=300,Rounding=0})
-       :OnChanged(function(v) flySpeed=v end)
-    sec:AddToggle("NoclipToggle", {Title="Noclip",Default=false})
-       :OnChanged(function(s) if s then enableNoclip() else disableNoclip() end end)
-
-    sec:AddToggle("AutoCollectToggle", {Title="Auto Collect Rings",Default=false})
-       :OnChanged(function(s)
-           autoCollectActive = s
-           if s then
-               autoCollectTask = task.spawn(function()
-                   while autoCollectActive do
-                       autoCollectMoney()
-                       task.wait(1)
-                   end
-               end)
-           else
-               if autoCollectTask then task.cancel(autoCollectTask) end
-               if not undergroundActive then disableFly() end
-           end
-       end)
-
-    sec:AddToggle("AutoCollectUndergroundToggle", {Title="Collect Underground Only",Default=false})
-       :OnChanged(function(s)
-           undergroundActive = s
-           if s then
-               undergroundTask = task.spawn(function()
-                   while undergroundActive do
-                       collectUnderground()
-                       task.wait(1)
-                   end
-               end)
-           else
-               if undergroundTask then task.cancel(undergroundTask) end
-               if not autoCollectActive then disableFly() end
-           end
-       end)
-
-    local afk = Tabs.Player:AddSection("Anti AFK")
-    afk:AddToggle("AntiAFKToggle", {Title="Anti AFK",Default=false})
-       :OnChanged(function(s)
-           if s then
-               LocalPlayer.Idled:Connect(function()
-                   game:GetService("VirtualUser"):CaptureController()
-                   game:GetService("VirtualUser"):ClickButton2(Vector2.new())
-               end)
-           end
-       end)
-end
-
--- Chams / ESP / Nametags
-do
-    -- Chams
-    local chamsColor    = Color3.new(1,1,1)
-    local chamsActive   = false
-    local chamsTask
-
-    local function applyChams(chr)
-        task.wait(0.1)
-        if not chr or not chr:IsDescendantOf(game) then return end
-        pcall(function()
-            local hl = chr:FindFirstChild("ChamHighlight")
-            if not hl then
-                hl = Instance.new("Highlight")
-                hl.Name               = "ChamHighlight"
-                hl.Adornee            = chr
-                hl.FillTransparency   = 0.5
-                hl.OutlineTransparency= 0
-                hl.Parent             = chr
-            end
-            hl.FillColor    = chamsColor
-            hl.OutlineColor = chamsColor
-        end)
+        return
     end
 
-    local function updateChams()
-        for _,p in ipairs(Players:GetPlayers()) do
-            if p~=LocalPlayer and p.Character then
-                applyChams(p.Character)
-            end
+    if tostring(err):find("token_invalid") or tostring(err):find("bad_request_no_token") then
+        Status.Text = "Trying as license key..."
+        local ok, reason = validateLicense(text)
+        if ok then
+            saveCachedKey(text)
+            Status.Text="License valid. Loading main script..."
+            task.wait(0.3); if Gui then Gui:Destroy() end
+            local ok2,err2=pcall(function() loadstring(game:HttpGet(MAIN_SCRIPT_URL,true))() end)
+            if not ok2 then warn("Main script error: ",err2) end
+        else
+            Status.Text="License invalid: "..tostring(reason)
         end
+    else
+        Status.Text = "Redeem failed: "..tostring(err)
     end
-
-    local function removeChams()
-        for _,p in ipairs(Players:GetPlayers()) do
-            if p.Character then
-                local hl = p.Character:FindFirstChild("ChamHighlight")
-                if hl then hl:Destroy() end
-            end
-        end
-    end
-
-    -- Skeleton ESP
-    local SkeletonConnections = {
-        {"Head","UpperTorso"},{"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},
-        {"LeftLowerArm","LeftHand"},{"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},
-        {"RightLowerArm","RightHand"},{"UpperTorso","LowerTorso"},{"LowerTorso","LeftUpperLeg"},
-        {"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},{"LowerTorso","RightUpperLeg"},
-        {"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"}
-    }
-    local skeletonESPEnabled = false
-    local skeletonESPColor   = Color3.new(1,0,0)
-    local SkeletonESPs       = {}
-
-    local function CreateSkeletonForPlayer(player)
-        local drawings = {}
-        for i, conn in ipairs(SkeletonConnections) do
-            local line = Drawing.new("Line")
-            line.Visible      = true
-            line.Transparency = 1
-            line.Color       = skeletonESPColor
-            line.Thickness   = 2
-            drawings[i]      = line
-        end
-        SkeletonESPs[player] = drawings
-    end
-
-    local function UpdateSkeletonESP(player)
-        if not SkeletonESPs[player] then CreateSkeletonForPlayer(player) end
-        local drawings = SkeletonESPs[player]
-        local char     = player.Character
-        if char then
-            for i, conn in ipairs(SkeletonConnections) do
-                local partA = char:FindFirstChild(conn[1])
-                local partB = char:FindFirstChild(conn[2])
-                if partA and partB then
-                    local a,onA = Workspace.CurrentCamera:WorldToViewportPoint(partA.Position)
-                    local b,onB = Workspace.CurrentCamera:WorldToViewportPoint(partB.Position)
-                    if onA and onB then
-                        local line = drawings[i]
-                        line.Visible = true
-                        line.From    = Vector2.new(a.X,a.Y)
-                        line.To      = Vector2.new(b.X,b.Y)
-                        line.Color   = skeletonESPColor
-                    else
-                        drawings[i].Visible = false
-                    end
-                else
-                    drawings[i].Visible = false
-                end
-            end
-        end
-    end
-
-    -- Nametags
-    local NametagsActive = false
-    local nametagTask
-
-    local function CreateNametag(p)
-        local bill = Instance.new("BillboardGui")
-        bill.Name        = "Nametag"
-        bill.Size        = UDim2.new(0,50,0,50)
-        bill.StudsOffset = Vector3.new(0,2,0)
-        bill.AlwaysOnTop = true
-        local frame      = Instance.new("Frame", bill)
-        frame.Size       = UDim2.new(1,0,1,0)
-        frame.BackgroundTransparency = 1
-        local lbl        = Instance.new("TextLabel", frame)
-        lbl.Size        = UDim2.new(1,0,1,0)
-        lbl.BackgroundTransparency = 1
-        lbl.Text         = p.Name
-        lbl.TextScaled   = false
-        lbl.TextSize     = 14
-        lbl.Font         = Enum.Font.GothamBold
-        lbl.TextColor3   = chamsColor
-        lbl.TextStrokeTransparency = 0.3
-        return bill
-    end
-
-    local function UpdateNametags()
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p~=LocalPlayer and p.Character and p.Character:FindFirstChild("Head") then
-                local head = p.Character.Head
-                if not head:FindFirstChild("Nametag") then
-                    local tag = CreateNametag(p)
-                    tag.Parent = head
-                end
-            end
-        end
-    end
-
-    local function RemoveNametags()
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p.Character and p.Character:FindFirstChild("Head") then
-                local tag = p.Character.Head:FindFirstChild("Nametag")
-                if tag then tag:Destroy() end
-            end
-        end
-    end
-
-    -- ESP-Section
-    local sec = Tabs.Chams:AddSection("ESP / Chams / Nametags")
-    sec:AddToggle("ChamsToggle",{Title="Chams",Default=false})
-       :OnChanged(function(s)
-           chamsActive = s
-           if s then
-               chamsTask = task.spawn(function()
-                   while chamsActive do
-                       updateChams()
-                       task.wait(0.5)
-                   end
-               end)
-           else
-               if chamsTask then task.cancel(chamsTask) end
-               removeChams()
-           end
-       end)
-    sec:AddColorpicker("ChamsColor",{Title="Chams Color",Default=Color3.new(1,1,1)})
-       :OnChanged(function(c) chamsColor = c end)
-
-    sec:AddToggle("SkeletonESPToggle",{Title="Skeleton ESP",Default=false})
-       :OnChanged(function(s)
-           skeletonESPEnabled = s
-           if not s then
-               for _, lines in pairs(SkeletonESPs) do
-                   for _, l in ipairs(lines) do l:Remove() end
-               end
-               SkeletonESPs = {}
-           end
-       end)
-    sec:AddColorpicker("SkeletonESPColor",{Title="Skeleton Color",Default=Color3.new(1,0,0)})
-       :OnChanged(function(c) skeletonESPColor = c end)
-    RunService.RenderStepped:Connect(function()
-        if skeletonESPEnabled then
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p~=LocalPlayer and p.Character then
-                    UpdateSkeletonESP(p)
-                end
-            end
-        end
-    end)
-
-    sec:AddToggle("NametagsToggle",{Title="Nametags",Default=false})
-       :OnChanged(function(s)
-           NametagsActive = s
-           if s then
-               nametagTask = task.spawn(function()
-                   while NametagsActive do
-                       UpdateNametags()
-                       task.wait(2)
-                   end
-               end)
-           else
-               if nametagTask then task.cancel(nametagTask) end
-               RemoveNametags()
-           end
-       end)
-end
-
--- Voice Tab
-do
-    local sec = Tabs.Voice:AddSection("Voice Chat")
-    sec:AddButton({Title="Bypass Voiceban",Callback=function()
-        if VoiceChatService and VoiceChatService.joinVoice then
-            local ok,err = pcall(function() VoiceChatService:joinVoice() end)
-            if not ok then warn("Voice join failed: "..tostring(err)) end
-            reEnableMovement()
-        end
-    end})
-    local auto = false
-    sec:AddToggle("AutoVoiceJoin",{Title="Auto Join",Default=false})
-       :OnChanged(function(s)
-           auto = s
-           if s then
-               task.spawn(function()
-                   while auto do
-                       if not pcall(function() return VoiceChatService.Running end) then
-                           pcall(function() VoiceChatService:joinVoice() end)
-                       end
-                       reEnableMovement()
-                       task.wait(5)
-                   end
-               end)
-           end
-       end)
-end
-
--- Teleport Tab
-do
-    local sec = Tabs.Teleport:AddSection("Teleport Players")
-    local buttons = {}
-    for _,p in ipairs(Players:GetPlayers()) do
-        if p~=LocalPlayer then
-            buttons[p.UserId] = sec:AddButton({
-                Title = p.Name,
-                Callback = function() TeleportToPlayer(p) end
-            })
-        end
-    end
-    Players.PlayerAdded:Connect(function(p)
-        if p~=LocalPlayer then
-            buttons[p.UserId] = sec:AddButton({
-                Title = p.Name,
-                Callback = function() TeleportToPlayer(p) end
-            })
-        end
-    end)
-    Players.PlayerRemoving:Connect(function(p)
-        if buttons[p.UserId] then buttons[p.UserId]:Remove(); buttons[p.UserId]=nil end
-    end)
-end
-
--- Spectate Tab
-do
-    local sec = Tabs.Spectate:AddSection("Spectate Players")
-    sec:AddButton({Title="Stop Spectate",Callback=StopSpectating})
-    local buttons = {}
-    for _,p in ipairs(Players:GetPlayers()) do
-        if p~=LocalPlayer then
-            buttons[p.UserId] = sec:AddButton({
-                Title=p.Name,
-                Callback=function() SpectatePlayer(p) end
-            })
-        end
-    end
-    Players.PlayerAdded:Connect(function(p)
-        if p~=LocalPlayer then
-            buttons[p.UserId] = sec:AddButton({
-                Title=p.Name,
-                Callback=function() SpectatePlayer(p) end
-            })
-        end
-    end)
-    Players.PlayerRemoving:Connect(function(p)
-        if buttons[p.UserId] then buttons[p.UserId]:Remove(); buttons[p.UserId]=nil end
-    end)
-end
-
--- Info Tab
-Tabs.Info:AddSection("Info"):AddParagraph({
-    Title="Info",
-    Content="★ Made by massivendurchfall ★\nDiscord: massivendurchfall\nhttps://discord.gg/2xDHnGg6J"
-})
-
--- Settings Tab
-SaveManager:SetLibrary(Fluent)
-InterfaceManager:SetLibrary(Fluent)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({})
-InterfaceManager:SetFolder("FluentScriptHub_MicUp")
-SaveManager:SetFolder("FluentScriptHub_MicUp/configs")
-InterfaceManager:BuildInterfaceSection(Tabs.Settings)
-SaveManager:BuildConfigSection(Tabs.Settings)
-SaveManager:LoadAutoloadConfig()
-
-Fluent:Notify({Title="Voice Ban Bypasser",Content="Script Loaded!",Duration=5})
-Window:SelectTab(1)
+end)
