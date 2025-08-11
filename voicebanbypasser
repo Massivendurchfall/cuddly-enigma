@@ -146,7 +146,7 @@ local function createUI()
     local title=Instance.new("TextLabel")
     title.LayoutOrder=1
     title.Size=UDim2.new(1,0,0,28)
-    title.Text="Grow a Garden — License Check"
+    title.Text="Universal script — License Check"
     title.TextColor3=Color3.new(1,1,1)
     title.BackgroundTransparency=1
     title.TextXAlignment=Enum.TextXAlignment.Left
