@@ -732,6 +732,54 @@ local function sendChatMessage(msg)
     return ok
 end
 
+local function collectValveActivators()
+    local out = {}
+    local puzzles = workspace:FindFirstChild("GameKeeper") and workspace.GameKeeper:FindFirstChild("Puzzles")
+    if not puzzles then return out end
+    for _, d in ipairs(puzzles:GetDescendants()) do
+        if d:IsA("ClickDetector") and d.Parent and d.Parent.Name == "ValveButton" then
+            table.insert(out, d)
+        elseif d:IsA("ProximityPrompt") and d.Parent and d.Parent.Name == "ValveButton" then
+            table.insert(out, d)
+        end
+    end
+    return out
+end
+
+local function spamClickDetector(cd, duration)
+    local t0 = tick()
+    while cd and cd.Parent and tick() - t0 < duration do
+        pcall(function()
+            if cd.MaxActivationDistance then cd.MaxActivationDistance = math.huge end
+            fireclickdetector(cd)
+        end)
+        task.wait(0.05)
+    end
+end
+
+local function spamPrompt(pp, duration)
+    local t0 = tick()
+    while pp and pp.Parent and tick() - t0 < duration do
+        pcall(function()
+            fireproximityprompt(pp, 1)
+        end)
+        task.wait(0.05)
+    end
+end
+
+local function instantFinishValve(duration)
+    duration = duration or 4
+    local targets = collectValveActivators()
+    if #targets == 0 then return end
+    for _, obj in ipairs(targets) do
+        if obj:IsA("ClickDetector") then
+            task.spawn(spamClickDetector, obj, duration)
+        else
+            task.spawn(spamPrompt, obj, duration)
+        end
+    end
+end
+
 local ESPSection = Tabs.ESP:AddSection("ESP Toggles")
 
 local ComboCodeSection = Tabs.ESP:AddSection("Combination Puzzle")
@@ -743,7 +791,7 @@ local autoChatWatcher = nil
 local lastSentCombo = nil
 local lastObservedCombo = nil
 local scheduleToken = 0
-local chatDelaySeconds = 30
+local chatDelaySeconds = 20
 
 local function scheduleDelayedSend(code)
     scheduleToken = scheduleToken + 1
@@ -775,7 +823,7 @@ local function startAutoChatCombo()
     end
 end
 
-ComboCodeSection:AddToggle("AutoChatComboToggle", {
+ComboCodeSection:AddToggle("Auto Chat Combination Code", {
     Title = "Auto Chat Combination Code",
     Default = false,
     Callback = function(state)
@@ -791,7 +839,7 @@ ComboCodeSection:AddToggle("AutoChatComboToggle", {
 
 local ESPColorsSection = Tabs.ESP:AddSection("ESP Colors")
 
-ESPSection:AddToggle("CakeEspToggle", {
+ESPSection:AddToggle("Cake ESP", {
     Title = "Cake ESP",
     Default = false,
     Callback = function(state)
@@ -811,7 +859,7 @@ ESPSection:AddToggle("CakeEspToggle", {
     end
 })
 
-ESPSection:AddToggle("CoinEspToggle", {
+ESPSection:AddToggle("Coin ESP", {
     Title = "Coin ESP",
     Default = false,
     Callback = function(state)
@@ -831,7 +879,7 @@ ESPSection:AddToggle("CoinEspToggle", {
     end
 })
 
-ESPSection:AddToggle("ChamsToggle", {
+ESPSection:AddToggle("Player Chams", {
     Title = "Player Chams",
     Default = false,
     Callback = function(state)
@@ -849,7 +897,7 @@ ESPSection:AddToggle("ChamsToggle", {
     end
 })
 
-ESPSection:AddToggle("NametagToggle", {
+ESPSection:AddToggle("Nametags", {
     Title = "Nametags",
     Default = false,
     Callback = function(state)
@@ -867,7 +915,7 @@ ESPSection:AddToggle("NametagToggle", {
     end
 })
 
-ESPSection:AddToggle("ValveEspToggle", {
+ESPSection:AddToggle("Valve ESP", {
     Title = "Valve ESP",
     Default = false,
     Callback = function(state)
@@ -887,7 +935,7 @@ ESPSection:AddToggle("ValveEspToggle", {
     end
 })
 
-ESPSection:AddToggle("CubePuzzleEspToggle", {
+ESPSection:AddToggle("Cube Puzzle ESP", {
     Title = "Cube Puzzle ESP",
     Default = false,
     Callback = function(state)
@@ -907,7 +955,7 @@ ESPSection:AddToggle("CubePuzzleEspToggle", {
     end
 })
 
-ESPSection:AddToggle("CodePuzzleEspToggle", {
+ESPSection:AddToggle("Code Puzzle (Label)", {
     Title = "Code Puzzle (Label)",
     Default = false,
     Callback = function(state)
@@ -941,37 +989,37 @@ ESPSection:AddToggle("CodePuzzleEspToggle", {
     end
 })
 
-ESPColorsSection:AddColorpicker("CakeEspColor", {
+ESPColorsSection:AddColorpicker("Cake ESP", {
     Title = "Cake ESP",
     Default = cakeEspColor,
     Callback = function(color) cakeEspColor = color end
 })
-ESPColorsSection:AddColorpicker("CoinEspColor", {
+ESPColorsSection:AddColorpicker("Coin ESP", {
     Title = "Coin ESP",
     Default = coinEspColor,
     Callback = function(color) coinEspColor = color end
 })
-ESPColorsSection:AddColorpicker("EnemyChamsColor", {
+ESPColorsSection:AddColorpicker("Enemy Chams", {
     Title = "Enemy Chams",
     Default = enemyChamColor,
     Callback = function(color) enemyChamColor = color end
 })
-ESPColorsSection:AddColorpicker("TeamChamsColor", {
+ESPColorsSection:AddColorpicker("Team Chams", {
     Title = "Team Chams",
     Default = teamChamColor,
     Callback = function(color) teamChamColor = color end
 })
-ESPColorsSection:AddColorpicker("ValveEspColor", {
+ESPColorsSection:AddColorpicker("Valve ESP", {
     Title = "Valve ESP",
     Default = valveEspColor,
     Callback = function(color) valveEspColor = color end
 })
-ESPColorsSection:AddColorpicker("PuzzleNumberEspColor", {
+ESPColorsSection:AddColorpicker("Cube Puzzle ESP", {
     Title = "Cube Puzzle ESP",
     Default = puzzleNumberEspColor,
     Callback = function(color) puzzleNumberEspColor = color end
 })
-ESPColorsSection:AddColorpicker("PuzzleObjectEspColor", {
+ESPColorsSection:AddColorpicker("Code Puzzle (Label)", {
     Title = "Code Puzzle (Label)",
     Default = codePuzzleLabelColor,
     Callback = function(color) codePuzzleLabelColor = color end
@@ -1086,6 +1134,12 @@ AutoSection:AddToggle("Auto Kill", {
         else
             if autoKillThread then task.cancel(autoKillThread); autoKillThread=nil end
         end
+    end
+})
+AutoSection:AddButton({
+    Title = "Instant Finish Valve",
+    Callback = function()
+        instantFinishValve(4)
     end
 })
 AutoSection:AddToggle("Anti Kick Bypass", {
