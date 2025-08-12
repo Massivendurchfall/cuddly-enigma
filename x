@@ -134,6 +134,7 @@ local autoDeletePeelsActive, autoDeletePeelsThread = false, nil
 local autoCollectCoinsActive, autoCollectCoinsThread = false, nil
 local autoDeleteLockersActive, autoDeleteLockersThread = false, nil
 local autoKillActive, autoKillThread = false, nil
+local autoCakeActive, autoCakeThread = false, nil
 local antiKickConnection = nil
 
 local antiAfkConnection = nil
@@ -655,21 +656,39 @@ local function autoDeletePeelsFunc()
     end
 end
 
+local function collectTokenParts()
+    local list = {}
+    local map = workspace:FindFirstChild("GameKeeper") and workspace.GameKeeper:FindFirstChild("Map")
+    local tokens = map and map:FindFirstChild("Tokens")
+    if not tokens then return list end
+    for _, d in ipairs(tokens:GetDescendants()) do
+        if d:IsA("BasePart") and d.Name == "Token" and d:FindFirstChildOfClass("TouchTransmitter") or d:FindFirstChild("TouchInterest") then
+            table.insert(list, d)
+        end
+    end
+    return list
+end
+
 local function autoCollectCoinsFunc()
     while autoCollectCoinsActive do
         pcall(function()
-            for part in pairs(coinTargets) do
-                if part and part.Parent then
-                    local char = Players.LocalPlayer.Character
-                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        hrp.CFrame = CFrame.new(part.Position + Vector3.new(0, 2, 0))
-                        task.wait(0.25)
-                    end
+            local char = Players.LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if not hrp then return end
+            local tokens = collectTokenParts()
+            for _, tok in ipairs(tokens) do
+                if not autoCollectCoinsActive then break end
+                if tok and tok.Parent then
+                    pcall(function()
+                        firetouchinterest(hrp, tok, 0)
+                        task.wait(0.02)
+                        firetouchinterest(hrp, tok, 1)
+                    end)
+                    task.wait(0.03)
                 end
             end
         end)
-        task.wait(0.8)
+        task.wait(0.25)
     end
 end
 
@@ -719,7 +738,7 @@ local function sendChatMessage(msg)
     pcall(function()
         if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
             local channels = TextChatService:FindFirstChild("TextChannels")
-            local general = channels and channels:FindChild("RBXGeneral") or channels and channels:FindFirstChild("RBXGeneral")
+            local general = channels and channels:FindFirstChild("RBXGeneral")
             if general then general:SendAsync(msg); ok = true end
         end
     end)
@@ -734,7 +753,8 @@ end
 
 local function collectValveActivators()
     local out = {}
-    local puzzles = workspace:FindFirstChild("GameKeeper") and workspace.GameKeeper:FindFirstChild("Puzzles")
+    local puzzles = workspace:FindFirstChild("GameKeeper") and workspace.GameKeeper:FindChild("Puzzles")
+    if not puzzles then puzzles = workspace.GameKeeper:FindFirstChild("Puzzles") end
     if not puzzles then return out end
     for _, d in ipairs(puzzles:GetDescendants()) do
         if d:IsA("ClickDetector") and d.Parent and d.Parent.Name == "ValveButton" then
@@ -782,99 +802,79 @@ end
 
 local function getMainCakePlatePart()
     local gk = workspace:FindFirstChild("GameKeeper")
-    if not gk then return nil end
-    local puzzles = gk:FindFirstChild("Puzzles")
-    if not puzzles then return nil end
-    local cakePuzzle = puzzles:FindFirstChild("CakePuzzle")
+    local puzzles = gk and gk:FindFirstChild("Puzzles")
+    local cakePuzzle = puzzles and puzzles:FindFirstChild("CakePuzzle")
     if not cakePuzzle then return nil end
     local plate = cakePuzzle:FindFirstChild("Plate")
     if plate and plate:IsA("BasePart") then return plate end
-    return cakePuzzle:FindFirstChildWhichIsA("BasePart", true)
+    local root = cakePuzzle:FindFirstChild("Root")
+    local pp = root and root:FindFirstChildWhichIsA("BasePart", true)
+    return pp
 end
 
-local function findCakeMesh(plate)
-    if not plate then return nil end
-    local model = plate:FindFirstChild("Model")
-    if not model then return nil end
-    local cp = model:FindFirstChild("CakePlate")
-    if not cp then return nil end
-    local inner = cp:FindFirstChild("Model")
-    if not inner then return nil end
-    local cake = inner:FindFirstChild("Cake") or inner:FindFirstChildWhichIsA("BasePart", true)
-    return cake
-end
-
-local function findCakeClickDetector(plate)
-    if not plate then return nil end
-    local model = plate:FindFirstChild("Model")
-    if not model then return nil end
-    local cp = model:FindFirstChild("CakePlate")
-    if not cp then return nil end
-    local root = cp:FindFirstChild("Root")
-    if not root then return nil end
-    return root:FindFirstChildOfClass("ClickDetector")
-end
-
-local function plateTeleportPart(plate)
-    local p = plate:FindFirstChild("SpawnRoot") or plate:FindFirstChild("Plate")
-    if p and p:IsA("BasePart") then return p end
-    return plate:FindFirstChildWhichIsA("BasePart", true)
-end
-
-local function listCakePlates()
-    local out = {}
-    local items = workspace:FindFirstChild("GameKeeper") and workspace.GameKeeper:FindFirstChild("Map") and workspace.GameKeeper.Map:FindFirstChild("Items")
-    if not items then return out end
-    for _, child in ipairs(items:GetChildren()) do
-        if child.Name == "CakePlate" then
-            table.insert(out, child)
+local function listCakePieceClickDetectors()
+    local list = {}
+    local gk = workspace:FindFirstChild("GameKeeper")
+    local map = gk and gk:FindFirstChild("Map")
+    local items = map and map:FindFirstChild("Items")
+    if not items then return list end
+    for _, cp in ipairs(items:GetChildren()) do
+        if cp.Name == "CakePlate" then
+            local m = cp:FindFirstChild("Model")
+            local inner = m and m:FindFirstChild("CakePlate")
+            local root = inner and inner:FindFirstChild("Root")
+            local cd = root and root:FindFirstChildOfClass("ClickDetector")
+            if cd then table.insert(list, cd) end
         end
     end
-    return out
+    return list
 end
 
-local function autoCakeAll()
-    local lp = Players.LocalPlayer
-    local char = lp.Character or lp.CharacterAdded:Wait()
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+local function tryClickCakePiece(cd)
+    local ok = false
+    pcall(function()
+        if cd.MaxActivationDistance then cd.MaxActivationDistance = math.huge end
+        fireclickdetector(cd)
+        ok = true
+    end)
+    return ok
+end
+
+local function touchPart(hrp, part)
+    pcall(function()
+        firetouchinterest(hrp, part, 0)
+        task.wait(0.02)
+        firetouchinterest(hrp, part, 1)
+    end)
+end
+
+local function autoCakeFunc()
     local mainPlate = getMainCakePlatePart()
     if not mainPlate then return end
-    local original = hrp.CFrame
-    local mainCF = mainPlate.CFrame + Vector3.new(0, 3, 0)
-    hrp.CFrame = mainCF
-    task.wait(0.25)
-    for _, plate in ipairs(listCakePlates()) do
-        local cakeMesh = findCakeMesh(plate)
-        if cakeMesh and cakeMesh.Parent then
-            local cd = findCakeClickDetector(plate)
-            if cd then
-                pcall(function() if cd.MaxActivationDistance then cd.MaxActivationDistance = math.huge end end)
-                for i=1,8 do
-                    pcall(function() fireclickdetector(cd) end)
-                    task.wait(0.05)
-                end
-            end
-            task.wait(0.15)
-            if findCakeMesh(plate) and findCakeMesh(plate).Parent then
-                local tpPart = plateTeleportPart(plate)
-                if tpPart then
-                    hrp.CFrame = tpPart.CFrame + Vector3.new(0, 3, 0)
+    local char = Players.LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    pcall(function()
+        hrp.CFrame = CFrame.new(mainPlate.Position + Vector3.new(0, 3, 0))
+    end)
+    task.wait(0.2)
+    while autoCakeActive do
+        local cds = listCakePieceClickDetectors()
+        if #cds == 0 then break end
+        for _, cd in ipairs(cds) do
+            if not autoCakeActive then break end
+            if cd and cd.Parent then
+                if tryClickCakePiece(cd) then
                     task.wait(0.15)
-                    cd = findCakeClickDetector(plate)
-                    if cd then
-                        for i=1,10 do
-                            pcall(function() fireclickdetector(cd) end)
-                            task.wait(0.05)
-                        end
-                    end
+                    touchPart(hrp, mainPlate)
+                    task.wait(0.2)
+                else
+                    task.wait(0.1)
                 end
             end
-            hrp.CFrame = mainCF
-            task.wait(0.25)
         end
+        task.wait(0.2)
     end
-    hrp.CFrame = original
 end
 
 local ESPSection = Tabs.ESP:AddSection("ESP Toggles")
@@ -1239,10 +1239,17 @@ AutoSection:AddButton({
         instantFinishValve(4)
     end
 })
-AutoSection:AddButton({
-    Title = "Auto Cake (All)",
-    Callback = function()
-        autoCakeAll()
+AutoSection:AddToggle("Auto Cake", {
+    Title = "Auto Cake",
+    Default = false,
+    Callback = function(state)
+        autoCakeActive = state
+        if state then
+            if autoCakeThread then task.cancel(autoCakeThread) end
+            autoCakeThread = task.spawn(autoCakeFunc)
+        else
+            if autoCakeThread then task.cancel(autoCakeThread); autoCakeThread=nil end
+        end
     end
 })
 AutoSection:AddToggle("Anti Kick Bypass", {
