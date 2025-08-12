@@ -1,4 +1,4 @@
--- Banana Eats Script - by Massivendurchfall (full build: Auto Cake main-plate, Auto Escape debounced, Valve, Coins touch, Combo label toggle, 30s chat)
+-- Banana Eats Script - by Massivendurchfall (full build: Auto Cake + Auto Escape + fixes)
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
@@ -16,7 +16,7 @@ local LP = Players.LocalPlayer
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 local isGuiVisible = true
 
--- ===== Lighting backup =====
+-- ===== lighting backup =====
 local initialLighting = {
     Brightness = Lighting.Brightness,
     ClockTime = Lighting.ClockTime,
@@ -36,7 +36,7 @@ local function restoreLighting()
     Lighting.ExposureCompensation = initialLighting.ExposureCompensation
 end
 
--- ===== Window =====
+-- ===== window =====
 local Window = Fluent:CreateWindow({
     Title = "Banana Eats Script",
     SubTitle = "by Massivendurchfall",
@@ -50,32 +50,28 @@ local Window = Fluent:CreateWindow({
 local Tabs = {
     ESP = Window:AddTab({ Title = "ESP", Icon = "eye" }),
     Player = Window:AddTab({ Title = "Player", Icon = "user" }),
-    Auto = Window:AddTab({ Title = "Auto", Icon = "log-out" }), -- door-like
+    Auto = Window:AddTab({ Title = "Auto", Icon = "log-out" }), -- door-like icon
     Visual = Window:AddTab({ Title = "Visual", Icon = "sun" }),
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
 }
 
--- ===== Helpers =====
-local function getHRP()
-    local c = LP.Character
-    return c and c:FindFirstChild("HumanoidRootPart")
-end
-
+-- ===== small helpers =====
 local function createBillboard(text)
     local billboard = Instance.new("BillboardGui")
     billboard.AlwaysOnTop = true
     billboard.Size = UDim2.new(0, 200, 0, 50)
-    billboard.StudsOffset = Vector3.new(0,3,0)
-    local lbl = Instance.new("TextLabel")
-    lbl.BackgroundTransparency = 1
-    lbl.Size = UDim2.new(1,0,1,0)
-    lbl.Text = text
-    lbl.TextColor3 = Color3.new(1,1,1)
-    lbl.TextStrokeTransparency = 0
-    lbl.TextStrokeColor3 = Color3.new(0,0,0)
-    lbl.TextSize = 14
-    lbl.Font = Enum.Font.GothamBold
-    lbl.Parent = billboard
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.Text = text
+    textLabel.TextSize = 14
+    textLabel.Font = Enum.Font.GothamBold
+    textLabel.TextColor3 = Color3.new(1,1,1)
+    textLabel.TextStrokeTransparency = 0
+    textLabel.TextStrokeColor3 = Color3.new(0,0,0)
+    textLabel.Name = "Label"
+    textLabel.Parent = billboard
     return billboard
 end
 
@@ -92,31 +88,34 @@ local function makeBoxAdornment(part, name, color, sizeInflate)
     return esp
 end
 
-local function safePrimary(base)
-    if base:IsA("Model") and base.PrimaryPart then return base.PrimaryPart end
-    if base:IsA("BasePart") then return base end
-    return base:FindFirstChildWhichIsA("BasePart", true)
+local function getHRP()
+    local c = LP.Character or LP.CharacterAdded:Wait()
+    local hrp = c:FindFirstChild("HumanoidRootPart")
+    if hrp then return hrp end
+    c:WaitForChild("HumanoidRootPart")
+    return c:FindFirstChild("HumanoidRootPart")
 end
 
-local function fireTouch(part)
+local function forceTP(cf)
+    local c = LP.Character
+    if not c then return end
+    local hum = c:FindFirstChildOfClass("Humanoid")
     local hrp = getHRP()
-    if not hrp or not part or not part.Parent then return end
-    pcall(function()
-        firetouchinterest(hrp, part, 0)
+    if hum then
+        hum.Sit = false
+        hum.PlatformStand = false
+    end
+    for i=1,5 do
+        pcall(function() hrp.CFrame = cf end)
         task.wait(0.05)
-        firetouchinterest(hrp, part, 1)
-    end)
+        if (hrp.CFrame.Position - cf.Position).Magnitude < 1.5 then return end
+        pcall(function() c:PivotTo(cf) end)
+        task.wait(0.05)
+        if (hrp.CFrame.Position - cf.Position).Magnitude < 1.5 then return end
+    end
 end
 
-local function fireClickOrPrompt(root)
-    if not root or not root.Parent then return end
-    local cd = root:FindFirstChildWhichIsA("ClickDetector", true)
-    local pp = root:FindFirstChildWhichIsA("ProximityPrompt", true)
-    if cd then pcall(function() if cd.MaxActivationDistance then cd.MaxActivationDistance = math.huge end; fireclickdetector(cd) end) end
-    if pp then pcall(function() fireproximityprompt(pp, 1) end) end
-end
-
--- ===== ESP caches / toggles =====
+-- ===== caches / toggles =====
 local cakeEspActive, cakeLoop, cakeConnAdd, cakeConnRem = false, nil, nil, nil
 local cakeEspColor = Color3.fromRGB(255,255,0)
 local cakeTargets = {}
@@ -140,7 +139,7 @@ local puzzleNumberEspColor = Color3.fromRGB(255,255,255)
 local puzzleNumbers = {["23"]=true,["34"]=true,["31"]=true}
 local puzzleNumberTargets = {}
 
--- Combination Code
+-- Combination Code (label + reading)
 local comboLabelEspActive = false
 local codePuzzleLabelAttached = false
 local codePuzzleConnAdd = nil
@@ -175,26 +174,36 @@ local autoDeleteLockersActive, autoDeleteLockersThread = false, nil
 local autoKillActive, autoKillThread = false, nil
 local autoEscapeActive, autoEscapeThread = false, nil
 local autoCakeActive, autoCakeThread = false, nil
-
--- anti kick / AFK
 local antiKickConnection = nil
-local antiAfkConnection = nil
 
--- auto chat combo
+-- combo auto chat
 local autoChatComboActive = false
 local autoChatWatcher = nil
-local lastSentCombo, lastObservedCombo = nil, nil
+local lastSentCombo = nil
+local lastObservedCombo = nil
 local scheduleToken = 0
 local chatDelaySeconds = 30
 
--- ===== Clear helpers =====
+-- ===== utility remove/clear =====
 local function clearAdornment(part, name) if part and part:FindFirstChild(name) then part[name]:Destroy() end end
 local function clearBillboard(part, name) if part and part:FindFirstChild(name) then part[name]:Destroy() end end
 
-local function removeCakeEsp() for part in pairs(cakeTargets) do if part and part.Parent then clearAdornment(part,"CakeESP"); clearBillboard(part,"CakeLabel") end end; cakeTargets = {} end
-local function removeCoinEsp() for part in pairs(coinTargets) do if part and part.Parent then clearAdornment(part,"CoinESP"); clearBillboard(part,"CoinLabel") end end; coinTargets = {} end
-local function removeValveEsp() for part in pairs(valveTargets) do if part and part.Parent then clearAdornment(part,"ValveESP"); clearBillboard(part,"ValveLabel") end end; valveTargets = {} end
-local function removePuzzleNumberEsp() for part in pairs(puzzleNumberTargets) do if part and part.Parent then clearAdornment(part,"PuzzleNumberESP"); clearBillboard(part,"PuzzleNumberLabel") end end; puzzleNumberTargets = {} end
+local function removeCakeEsp()
+    for part in pairs(cakeTargets) do if part and part.Parent then clearAdornment(part,"CakeESP"); clearBillboard(part,"CakeLabel") end end
+    cakeTargets = {}
+end
+local function removeCoinEsp()
+    for part in pairs(coinTargets) do if part and part.Parent then clearAdornment(part,"CoinESP"); clearBillboard(part,"CoinLabel") end end
+    coinTargets = {}
+end
+local function removeValveEsp()
+    for part in pairs(valveTargets) do if part and part.Parent then clearAdornment(part,"ValveESP"); clearBillboard(part,"ValveLabel") end end
+    valveTargets = {}
+end
+local function removePuzzleNumberEsp()
+    for part in pairs(puzzleNumberTargets) do if part and part.Parent then clearAdornment(part,"PuzzleNumberESP"); clearBillboard(part,"PuzzleNumberLabel") end end
+    puzzleNumberTargets = {}
+end
 
 local function removeChams()
     for _, plyr in pairs(Players:GetPlayers()) do
@@ -214,7 +223,7 @@ local function removeNametags()
     end
 end
 
--- ===== Predicates =====
+-- ===== predicates =====
 local function isCakePart(obj)
     if not obj:IsA("BasePart") then return false end
     local p = obj.Parent
@@ -227,7 +236,7 @@ end
 local function isCoinPart(obj)
     if not obj:IsA("BasePart") then return false end
     local p = obj.Parent
-    return (p and p.Name=="Tokens" and obj.Name=="Token") or (obj.Name=="Token")
+    return (p and p.Name=="Token" and obj.Name=="Token") or (p and p.Name=="Tokens" and obj.Name=="Token")
 end
 
 local function isValveBase(obj)
@@ -245,7 +254,7 @@ local function isPuzzleNumber(obj)
     return parent and parent.Name=="Buttons" and puzzleNumbers[obj.Name]==true
 end
 
--- ===== Workspace hook =====
+-- ===== workspace hooks =====
 local function initialScanAndCache(predicate, cacheTable)
     for _, obj in ipairs(workspace:GetDescendants()) do
         if predicate(obj) then cacheTable[obj] = true end
@@ -254,8 +263,12 @@ end
 local function hookWorkspace(predicate, cacheTable, onAddRef, onRemRef)
     if onAddRef then onAddRef:Disconnect() end
     if onRemRef then onRemRef:Disconnect() end
-    local addConn = workspace.DescendantAdded:Connect(function(obj) if predicate(obj) then cacheTable[obj] = true end end)
-    local remConn = workspace.DescendantRemoving:Connect(function(obj) if cacheTable[obj] then cacheTable[obj] = nil end end)
+    local addConn = workspace.DescendantAdded:Connect(function(obj)
+        if predicate(obj) then cacheTable[obj] = true end
+    end)
+    local remConn = workspace.DescendantRemoving:Connect(function(obj)
+        if cacheTable[obj] then cacheTable[obj] = nil end
+    end)
     return addConn, remConn
 end
 
@@ -291,7 +304,7 @@ local function valveEspLoopFunction()
     while valveEspActive do
         for base in pairs(valveTargets) do
             if base and base.Parent then
-                local part = safePrimary(base) or base
+                local part = (base:IsA("BasePart") and base) or safePrimary(base)
                 if part then
                     if not part:FindFirstChild("ValveESP") then makeBoxAdornment(part,"ValveESP",valveEspColor) else part.ValveESP.Color3 = valveEspColor end
                     if not part:FindFirstChild("ValveLabel") then local b = createBillboard("Valve"); b.Name="ValveLabel"; b.Parent = part end
@@ -317,19 +330,25 @@ end
 
 -- ===== Combination puzzle helpers =====
 local function findCombinationPuzzleModel()
-    local gk = workspace:FindFirstChild("GameKeeper"); if not gk then return nil end
-    local puzzles = gk:FindFirstChild("Puzzles"); if not puzzles then return nil end
+    local gk = workspace:FindFirstChild("GameKeeper")
+    if not gk then return nil end
+    local puzzles = gk:FindFirstChild("Puzzles")
+    if not puzzles then return nil end
     return puzzles:FindFirstChild("CombinationPuzzle")
 end
 
 local function findCombinationPuzzlePart()
-    local cp = findCombinationPuzzleModel(); if not cp then return nil end
-    return cp.PrimaryPart or cp:FindFirstChildWhichIsA("BasePart", true)
+    local cp = findCombinationPuzzleModel()
+    if not cp then return nil end
+    local target = cp.PrimaryPart or cp:FindFirstChildWhichIsA("BasePart", true)
+    return target
 end
 
 local function getComboButtonsFolder()
-    local cp = findCombinationPuzzleModel(); if not cp then return nil end
-    local key = cp:FindFirstChild("CombinationKey"); if not key then return nil end
+    local cp = findCombinationPuzzleModel()
+    if not cp then return nil end
+    local key = cp:FindFirstChild("CombinationKey")
+    if not key then return nil end
     return key:FindFirstChild("Buttons")
 end
 
@@ -352,12 +371,14 @@ end
 local function attachCodePuzzleLabelOnce()
     if codePuzzleLabelAttached then return end
     local target = findCombinationPuzzlePart()
-    if target and not target:FindFirstChild("PuzzleLabel") then
-        local b = createBillboard("Combination Puzzle")
-        b.Name = "PuzzleLabel"
-        b.Parent = target
+    if target then
+        if not target:FindFirstChild("PuzzleLabel") then
+            local b = createBillboard("Combination Puzzle")
+            b.Name = "PuzzleLabel"
+            b.Parent = target
+        end
+        codePuzzleLabelAttached = true
     end
-    codePuzzleLabelAttached = true
 end
 
 local function ensureComboLabel(state)
@@ -371,8 +392,8 @@ local function ensureComboLabel(state)
                     local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)
                     if part and not part:FindFirstChild("PuzzleLabel") then
                         local b = createBillboard("Combination Puzzle")
-                        b.Name = "PuzzleLabel"
-                        b.Parent = part
+                        b.Name="PuzzleLabel"
+                        b.Parent=part
                         codePuzzleLabelAttached = true
                     end
                 end
@@ -400,7 +421,7 @@ local function startComboWatcher()
     end)
 end
 
--- ===== Chat helper =====
+-- ===== chat helper =====
 local function sendChatMessage(msg)
     local ok = false
     pcall(function()
@@ -420,11 +441,13 @@ local function sendChatMessage(msg)
     return ok
 end
 
--- ===== Valves =====
+-- ===== valves =====
 local function collectValveActivators()
     local out = {}
-    local gk = workspace:FindFirstChild("GameKeeper"); if not gk then return out end
-    local puzzles = gk:FindFirstChild("Puzzles"); if not puzzles then return out end
+    local gk = workspace:FindFirstChild("GameKeeper")
+    if not gk then return out end
+    local puzzles = gk:FindFirstChild("Puzzles")
+    if not puzzles then return out end
     for _, d in ipairs(puzzles:GetDescendants()) do
         if d:IsA("ClickDetector") and d.Parent and d.Parent.Name=="ValveButton" then
             table.insert(out, d)
@@ -464,7 +487,16 @@ local function instantFinishValve(duration)
     end
 end
 
--- ===== Coins via touch (no TP) =====
+-- ===== coins via touch (no TP required) =====
+local function fireTouch(part)
+    local hrp = getHRP(); if not hrp or not part or not part.Parent then return end
+    pcall(function()
+        firetouchinterest(hrp, part, 0) -- begin
+        task.wait(0.05)
+        firetouchinterest(hrp, part, 1) -- end
+    end)
+end
+
 local function autoCollectCoinsFunc()
     while autoCollectCoinsActive do
         pcall(function()
@@ -483,14 +515,7 @@ local function autoCollectCoinsFunc()
     end
 end
 
--- ===== Auto Escape (debounced) =====
-local TOUCH_COOLDOWN = 0.4
-local TP_COOLDOWN = 1.0
-local CHECK_INTERVAL = 0.15
-
-local lastTouchAt = {}
-local lastTpTime = 0
-
+-- ===== Auto Escape =====
 local function findEscapeTouchParts()
     local out = {}
     local gk = workspace:FindFirstChild("GameKeeper"); if not gk then return out end
@@ -498,7 +523,7 @@ local function findEscapeTouchParts()
     for _, door in ipairs(exits:GetChildren()) do
         local root = door:FindFirstChild("Root", true) or door:FindFirstChild("Root")
         if root and root:IsA("BasePart") then
-            if root:FindFirstChild("TouchInterest") or root:FindFirstChildOfClass("TouchTransmitter") then
+            if root:FindFirstChildOfClass("TouchTransmitter") or root:FindFirstChild("TouchInterest") then
                 table.insert(out, root)
             end
         end
@@ -509,138 +534,157 @@ end
 local function autoEscapeLoop()
     while autoEscapeActive do
         pcall(function()
-            local hrp = getHRP(); if not hrp then return end
             local parts = findEscapeTouchParts()
             if #parts > 0 then
-                -- touch each with cooldown
-                for _, p in ipairs(parts) do
-                    local k = p:GetDebugId()
-                    if not lastTouchAt[k] or (tick() - lastTouchAt[k]) >= TOUCH_COOLDOWN then
-                        fireTouch(p)
-                        lastTouchAt[k] = tick()
-                    end
-                end
-                -- gentle TP to door if far, limited by TP_COOLDOWN
-                if (tick() - lastTpTime) >= TP_COOLDOWN then
-                    for _, p in ipairs(parts) do
-                        if (hrp.Position - p.Position).Magnitude > 8 then
-                            hrp.CFrame = CFrame.new(p.Position + Vector3.new(0, 2, 0))
-                            task.wait(0.05)
-                            fireTouch(p)
+                for _, part in ipairs(parts) do fireTouch(part) end
+                local hrp = getHRP()
+                if hrp then
+                    for _, part in ipairs(parts) do
+                        if (hrp.Position - part.Position).Magnitude > 8 then
+                            hrp.CFrame = CFrame.new(part.Position + Vector3.new(0, 2, 0))
+                            task.wait(0.06)
+                            fireTouch(part)
                         end
                     end
-                    lastTpTime = tick()
                 end
             end
         end)
-        task.wait(CHECK_INTERVAL)
+        task.wait(0.2) -- nicht zu aggressiv spammen
     end
 end
 
--- ===== Auto Cake (Main plate then mass pick) =====
-local AC_PICK_DELAY = 0.5
-
+-- ===== Auto Cake =====
 local function findMainCakeInteract()
-    -- try Puzzles (main plate)
     local gk = workspace:FindFirstChild("GameKeeper"); if not gk then return nil end
     local puzzles = gk:FindFirstChild("Puzzles"); if not puzzles then return nil end
-    -- search for anything named "CakePuzzle" or a model with "MainPlate"
-    local cp = puzzles:FindFirstChild("CakePuzzle")
-    local root = nil
-    if cp then
-        root = cp:FindFirstChild("MainPlate", true) or cp:FindFirstChild("Main", true) or cp:FindFirstChild("Root", true)
+
+    local bestPart, bestScore = nil, -1
+    local function scorePart(p)
+        local score = 0
+        local name = p.Name:lower()
+        if name:find("main") then score += 3 end
+        if name:find("plate") or name:find("table") then score += 2 end
+        if name:find("cake") then score += 1 end
+        for _,d in ipairs(p:GetDescendants()) do
+            if d:IsA("ClickDetector") or d:IsA("ProximityPrompt") then score += 1 end
+        end
+        return score
     end
-    -- fallback generic: any BasePart under Puzzles named Plate/Root having ClickDetector/Prompt
-    if not root then
-        for _, d in ipairs(puzzles:GetDescendants()) do
-            if d:IsA("BasePart") and (d.Name == "Plate" or d.Name == "Root" or d.Name=="MainPlate") then
-                if d:FindFirstChildWhichIsA("ClickDetector", true) or d:FindFirstChildWhichIsA("ProximityPrompt", true) then
-                    root = d; break
-                end
+
+    for _, obj in ipairs(puzzles:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local hasInteract = obj:FindFirstChildWhichIsA("ClickDetector", true)
+                              or obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if hasInteract then
+                local s = scorePart(obj)
+                if s > bestScore then bestScore = s; bestPart = obj end
             end
         end
     end
-    return root
+    return bestPart
 end
 
-local function getAllCakeTakeInteractParts()
-    -- scattered cake plates: workspace.GameKeeper.Map.Items.CakePlate.* -> Cake -> Interact (ClickDetector/Prompt)
-    local out = {}
-    local gk = workspace:FindFirstChild("GameKeeper"); if not gk then return out end
-    local map = gk:FindFirstChild("Map"); if not map then return out end
-    local items = map:FindFirstChild("Items"); if not items then return out end
-    local platesFolder = items:FindFirstChild("CakePlate") or items:FindFirstChild("CakePlates") or items
-    for _, plate in ipairs(platesFolder:GetChildren()) do
-        local cake = plate:FindFirstChild("Cake") or plate:FindFirstChild("CakeRoot")
+local function eachCakeInteractable(callback)
+    local gk = workspace:FindFirstChild("GameKeeper"); if not gk then return end
+    local map = gk:FindFirstChild("Map"); if not map then return end
+    local items = map:FindFirstChild("Items"); if not items then return end
+    local plates = items:FindFirstChild("CakePlate") or items:FindFirstChild("CakePlates") or items
+    for _, plate in ipairs(plates:GetChildren()) do
+        local cake = plate:FindFirstChild("Cake") or plate:FindFirstChildWhichIsA("Model")
         if cake then
-            local interact = cake:FindFirstChild("Interact") or cake:FindFirstChild("Root") or cake
-            if interact and (interact:FindFirstChildWhichIsA("ClickDetector", true) or interact:FindFirstChildWhichIsA("ProximityPrompt", true)) then
-                table.insert(out, interact)
-            end
-        end
-    end
-    -- extra fallback: any descendant named "Interact" under Items that has ClickDetector/Prompt and is inside a Cake model
-    for _, d in ipairs(items:GetDescendants()) do
-        if d.Name=="Interact" and (d:FindFirstChildWhichIsA("ClickDetector", true) or d:FindFirstChildWhichIsA("ProximityPrompt", true)) then
-            local up = d
-            while up and up ~= items and up.Parent do
-                if up.Name:lower():find("cake") then
-                    table.insert(out, d)
-                    break
+            local tried = false
+            for _, n in ipairs({"Interact","Root","Touch"}) do
+                local node = cake:FindFirstChild(n, true)
+                if node and node:IsA("BasePart") then
+                    local has = node:FindFirstChildWhichIsA("ClickDetector", true) 
+                             or node:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if has then
+                        tried = true
+                        local r = callback(node)
+                        if r == "break" then return end
+                        break
+                    end
                 end
-                up = up.Parent
+            end
+            if not tried then
+                for _, d in ipairs(cake:GetDescendants()) do
+                    if d:IsA("BasePart") then
+                        local has = d:FindFirstChildWhichIsA("ClickDetector", true)
+                                  or d:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if has then
+                            local r = callback(d)
+                            if r == "break" then return end
+                            break
+                        end
+                    end
+                end
             end
         end
     end
-    return out
 end
+
+local function fireClickOrPrompt(root)
+    if not root or not root.Parent then return end
+    for _, d in ipairs(root:GetDescendants()) do
+        if d:IsA("ClickDetector") then
+            pcall(function() if d.MaxActivationDistance then d.MaxActivationDistance = math.huge end; fireclickdetector(d) end)
+        elseif d:IsA("ProximityPrompt") then
+            pcall(function() fireproximityprompt(d, 1) end)
+        end
+    end
+    local cd = root:FindFirstChildWhichIsA("ClickDetector")
+    if cd then pcall(function() if cd.MaxActivationDistance then cd.MaxActivationDistance = math.huge end; fireclickdetector(cd) end) end
+    local pp = root:FindFirstChildWhichIsA("ProximityPrompt")
+    if pp then pcall(function() fireproximityprompt(pp, 1) end) end
+end
+
+local AC_PICK_DELAY = 0.5
+local EMPTY_SCANS_BEFORE_RETURN = 6
 
 local function autoCakeLoop()
-    -- phase 1: save original pos, go to main plate once
     local hrp = getHRP(); if not hrp then return end
     local originalCF = hrp.CFrame
 
     local mainInteract = findMainCakeInteract()
-    if not mainInteract then return end
-
-    -- teleport to main plate once and stay there
-    hrp.CFrame = CFrame.new(mainInteract.Position + Vector3.new(0, 3, 0))
-    task.wait(0.15)
-    -- fire its interact once to "focus" (not strictly required, but safe)
-    fireClickOrPrompt(mainInteract)
-
-    -- phase 2: collect all available cake pieces while staying here
-    local tried = {}
-    while autoCakeActive do
-        local anyPicked = false
-        local interactParts = getAllCakeTakeInteractParts()
-        for _, ip in ipairs(interactParts) do
-            if not autoCakeActive then break end
-            -- skip already tried this cycle
-            if not tried[ip] then
-                tried[ip] = true
-                -- just trigger the cake's Interact from afar
-                fireClickOrPrompt(ip)
-                task.wait(AC_PICK_DELAY)
-                anyPicked = true
-                -- after pick, trigger main plate interact to place (we are standing there)
-                fireClickOrPrompt(mainInteract)
-                task.wait(0.1)
-            end
-        end
-        if not anyPicked then
-            -- rescan again fresh and clear tried (some plates may respawn)
-            tried = {}
-            task.wait(0.5)
-        end
+    if not mainInteract then
+        Fluent:Notify({ Title = "Auto Cake", Content = "Main Plate nicht gefunden.", Duration = 4 })
+        return
     end
 
-    -- phase 3: when toggle off, return to original position
-    hrp = getHRP()
-    if hrp then hrp.CFrame = originalCF end
+    -- 1) Zur Main Plate und dort bleiben
+    forceTP(CFrame.new(mainInteract.Position + Vector3.new(0, 3, 0)))
+    task.wait(0.2)
+
+    local emptyScans = 0
+    while autoCakeActive do
+        local picked = false
+        pcall(function()
+            eachCakeInteractable(function(ip)
+                if not autoCakeActive then return "break" end
+                fireClickOrPrompt(ip)                 -- Stück aufnehmen
+                task.wait(AC_PICK_DELAY)
+                fireClickOrPrompt(mainInteract)       -- am Main ablegen
+                picked = true
+            end)
+        end)
+        if picked then
+            emptyScans = 0
+        else
+            emptyScans = emptyScans + 1
+            if emptyScans >= EMPTY_SCANS_BEFORE_RETURN then
+                break
+            end
+        end
+        task.wait(0.2)
+    end
+
+    -- 2) erst jetzt zurück
+    local now = getHRP()
+    if now then forceTP(originalCF) end
 end
 
--- ===== Anti AFK / Anti Kick =====
+-- ===== anti AFK / anti kick =====
+local antiAfkConnection = nil
 local function enableAntiAfk()
     if antiAfkConnection then return end
     antiAfkConnection = LP.Idled:Connect(function()
@@ -648,9 +692,7 @@ local function enableAntiAfk()
         VirtualUser:ClickButton2(Vector2.new(0, 0))
     end)
 end
-local function disableAntiAfk()
-    if antiAfkConnection then antiAfkConnection:Disconnect(); antiAfkConnection = nil end
-end
+local function disableAntiAfk() if antiAfkConnection then antiAfkConnection:Disconnect(); antiAfkConnection=nil end end
 
 local function startAntiKick()
     if not antiKickConnection then
@@ -660,17 +702,15 @@ local function startAntiKick()
         end)
     end
 end
-local function stopAntiKick()
-    if antiKickConnection then antiKickConnection:Disconnect(); antiKickConnection = nil end
-end
+local function stopAntiKick() if antiKickConnection then antiKickConnection:Disconnect(); antiKickConnection=nil end end
 
--- ===== ESP UI =====
+-- ======== UI: ESP ========
 local ESPSection = Tabs.ESP:AddSection("ESP Toggles")
 
 local comboUI = ESPSection:AddParagraph({ Title = "Combination Code", Content = "—" })
 comboParagraph = comboUI
 
-ESPSection:AddToggle("Combination Code Label", {
+ESPSection:AddToggle("Combination Code Label ESP", {
     Title = "Combination Code Label",
     Default = false,
     Callback = function(state)
@@ -737,7 +777,7 @@ ESPSection:AddToggle("Player Chams", {
                         cham.Adornee = part
                         cham.AlwaysOnTop = true
                         cham.ZIndex = 10
-                        cham.Size = part.Size + Vector3.new(0.1,0.1,0.1)
+                        cham.Size = part.Size + Vector3.new(0.1, 0.1, 0.1)
                         cham.Transparency = 0.5
                         cham.Color3 = color
                         cham.Parent = part
@@ -755,7 +795,12 @@ ESPSection:AddToggle("Player Chams", {
         if state then
             for _, p in ipairs(Players:GetPlayers()) do if p ~= LP then hookPlayer(p) end end
             if chamsLoop then task.cancel(chamsLoop) end
-            chamsLoop = task.spawn(function() while chamsActive do task.wait(1.5) end end)
+            chamsLoop = task.spawn(function()
+                while chamsActive do
+                    for _, p in ipairs(Players:GetPlayers()) do if p ~= LP then applyChamsToCharacter(p) end end
+                    task.wait(2.0)
+                end
+            end)
         else
             if chamsLoop then task.cancel(chamsLoop); chamsLoop=nil end
             removeChams()
@@ -783,7 +828,12 @@ ESPSection:AddToggle("Nametags", {
         if state then
             for _, p in ipairs(Players:GetPlayers()) do if p ~= LP then hookPlayer(p) end end
             if nametagLoop then task.cancel(nametagLoop) end
-            nametagLoop = task.spawn(function() while nametagActive do task.wait(2.0) end end)
+            nametagLoop = task.spawn(function()
+                while nametagActive do
+                    for _, p in ipairs(Players:GetPlayers()) do if p ~= LP then applyNametagToCharacter(p) end end
+                    task.wait(3.0)
+                end
+            end)
         else
             if nametagLoop then task.cancel(nametagLoop); nametagLoop=nil end
             removeNametags()
@@ -841,7 +891,7 @@ ESPColorsSection:AddColorpicker("Valve ESP", { Title="Valve ESP", Default=valveE
 ESPColorsSection:AddColorpicker("Cube Puzzle ESP", { Title="Cube Puzzle ESP", Default=puzzleNumberEspColor, Callback=function(c) puzzleNumberEspColor=c end })
 ESPColorsSection:AddColorpicker("Code Puzzle (Label)", { Title="Code Puzzle (Label)", Default=codePuzzleLabelColor, Callback=function(c) codePuzzleLabelColor=c end })
 
--- ===== Player UI =====
+-- ======== UI: Player ========
 local PlayerMovementSection = Tabs.Player:AddSection("Movement")
 PlayerMovementSection:AddSlider("Walk Speed", {
     Title="Walk Speed", Default=16, Min=16, Max=45, Rounding=0,
@@ -932,8 +982,28 @@ end})
 local PlayerUtilitySection = Tabs.Player:AddSection("Utility")
 PlayerUtilitySection:AddToggle("Anti-AFK", { Title="Anti-AFK", Default=false, Callback=function(state) if state then enableAntiAfk() else disableAntiAfk() end end })
 
--- ===== Auto UI =====
+-- ======== UI: Auto ========
 local AutoSection = Tabs.Auto:AddSection("Auto Features")
+
+AutoSection:AddToggle("Auto Cake", {
+    Title = "Auto Cake",
+    Default = false,
+    Callback = function(state)
+        autoCakeActive = state
+        if state then
+            if autoCakeThread then task.cancel(autoCakeThread) end
+            autoCakeThread = task.spawn(function()
+                while autoCakeActive do
+                    autoCakeLoop()
+                    -- nach einem kompletten Durchlauf kleine Pause
+                    task.wait(0.3)
+                end
+            end)
+        else
+            if autoCakeThread then task.cancel(autoCakeThread); autoCakeThread=nil end
+        end
+    end
+})
 
 AutoSection:AddToggle("Auto Collect Coins", {
     Title = "Auto Collect Coins",
@@ -1052,8 +1122,6 @@ AutoSection:AddToggle("Auto Escape", {
         autoEscapeActive = state
         if state then
             if autoEscapeThread then task.cancel(autoEscapeThread) end
-            lastTouchAt = {}
-            lastTpTime = 0
             autoEscapeThread = task.spawn(autoEscapeLoop)
         else
             if autoEscapeThread then task.cancel(autoEscapeThread); autoEscapeThread=nil end
@@ -1061,26 +1129,12 @@ AutoSection:AddToggle("Auto Escape", {
     end
 })
 
-AutoSection:AddToggle("Auto Cake (Main Plate Mode)", {
-    Title = "Auto Cake (Main Plate Mode)",
-    Default = false,
-    Callback = function(state)
-        autoCakeActive = state
-        if state then
-            if autoCakeThread then task.cancel(autoCakeThread) end
-            autoCakeThread = task.spawn(autoCakeLoop)
-        else
-            if autoCakeThread then task.cancel(autoCakeThread); autoCakeThread=nil end
-        end
-    end
-})
-
--- Auto Chat Combination Code (30s)
+-- Auto Chat Combination Code (30s Cooldown)
 local function scheduleDelayedSend(code)
     scheduleToken = scheduleToken + 1
     local myToken = scheduleToken
     task.delay(chatDelaySeconds, function()
-        if autoChatComboActive and myToken == scheduleToken and comboCurrentCode == code and lastSentCombo ~= code then
+        if autoChatComboActive and myToken==scheduleToken and comboCurrentCode==code and lastSentCombo ~= code then
             sendChatMessage("code: " .. tostring(code))
             lastSentCombo = code
         end
@@ -1122,7 +1176,7 @@ AutoSection:AddToggle("Anti Kick Bypass", {
     Callback = function(state) if state then startAntiKick() else stopAntiKick() end end
 })
 
--- ===== Visual UI =====
+-- ======== UI: Visual ========
 local VisualSection = Tabs.Visual
 VisualSection:AddToggle("Fullbright", { Title="Fullbright", Default=false, Callback=function(state)
     fullbrightActive = state
@@ -1132,21 +1186,13 @@ VisualSection:AddToggle("Fullbright", { Title="Fullbright", Default=false, Callb
         Lighting.FogEnd = 100000
         Lighting.GlobalShadows = false
         Lighting.OutdoorAmbient = Color3.fromRGB(128,128,128)
-    else
-        restoreLighting()
-    end
+    else restoreLighting() end
 end})
 VisualSection:AddToggle("No Fog", { Title="No Fog", Default=false, Callback=function(state)
     noFogActive = state
     if state then
         if noFogLoop then task.cancel(noFogLoop) end
-        noFogLoop = task.spawn(function()
-            while noFogActive do
-                Lighting.FogStart = 0
-                Lighting.FogEnd = 1e9
-                task.wait(1)
-            end
-        end)
+        noFogLoop = task.spawn(function() while noFogActive do Lighting.FogStart=0; Lighting.FogEnd=1e9; task.wait(1) end end)
     else
         if noFogLoop then task.cancel(noFogLoop); noFogLoop=nil end
         Lighting.FogStart = initialLighting.FogStart
@@ -1156,12 +1202,11 @@ end})
 VisualSection:AddToggle("Color Correction", { Title="Color Correction", Default=false, Callback=function(state)
     ccActive = state
     if state then
-        if not Lighting:FindFirstChild("ColorCorrectionEffect") then ccEffect = Instance.new("ColorCorrectionEffect"); ccEffect.Parent = Lighting
+        if not Lighting:FindFirstChild("ColorCorrectionEffect") then
+            ccEffect = Instance.new("ColorCorrectionEffect"); ccEffect.Parent = Lighting
         else ccEffect = Lighting:FindFirstChild("ColorCorrectionEffect") end
-        ccEffect.Brightness = ccBrightness; ccEffect.Contrast = ccContrast; ccEffect.Saturation = ccSaturation
-    else
-        if ccEffect then ccEffect:Destroy(); ccEffect=nil end
-    end
+        ccEffect.Brightness = ccBrightness; ccEffect.Contrast=ccContrast; ccEffect.Saturation=ccSaturation
+    else if ccEffect then ccEffect:Destroy(); ccEffect=nil end end
 end})
 VisualSection:AddSlider("Brightness", { Title="Brightness", Default=0, Min=-1, Max=1, Rounding=2, Callback=function(v) ccBrightness=v; if ccActive and ccEffect then ccEffect.Brightness=v end end })
 VisualSection:AddSlider("Contrast", { Title="Contrast", Default=0, Min=-2, Max=2, Rounding=2, Callback=function(v) ccContrast=v; if ccActive and ccEffect then ccEffect.Contrast=v end end })
@@ -1172,16 +1217,14 @@ VisualSection:AddToggle("Sun Rays", { Title="Sun Rays", Default=false, Callback=
         if not Lighting:FindFirstChild("SunRaysEffect") then sunRaysEffect = Instance.new("SunRaysEffect"); sunRaysEffect.Parent = Lighting
         else sunRaysEffect = Lighting:FindFirstChild("SunRaysEffect") end
         sunRaysEffect.Intensity = sunRaysIntensity
-    else
-        if sunRaysEffect then sunRaysEffect:Destroy(); sunRaysEffect=nil end
-    end
+    else if sunRaysEffect then sunRaysEffect:Destroy(); sunRaysEffect=nil end end
 end})
 VisualSection:AddSlider("Sun Rays Intensity", { Title="Sun Rays Intensity", Default=0.3, Min=0, Max=1, Rounding=2, Callback=function(v) sunRaysIntensity=v; if sunRaysActive and sunRaysEffect then sunRaysEffect.Intensity=v end end })
 
 local LightingSection = Tabs.Visual:AddSection("Lighting Controls")
-LightingSection:AddSlider("Time of Day", { Title="Time of Day", Default=initialLighting.ClockTime, Min=0, Max=24, Rounding=1, Callback=function(v) Lighting.ClockTime = v end })
-LightingSection:AddSlider("Exposure", { Title="Exposure", Default=initialLighting.ExposureCompensation, Min=-3, Max=3, Rounding=2, Callback=function(v) Lighting.ExposureCompensation = v end })
-LightingSection:AddToggle("Shadows", { Title="Shadows", Default=initialLighting.GlobalShadows, Callback=function(state) Lighting.GlobalShadows = state end })
+LightingSection:AddSlider("Time of Day", { Title="Time of Day", Default=initialLighting.ClockTime, Min=0, Max=24, Rounding=1, Callback=function(v) Lighting.ClockTime=v end })
+LightingSection:AddSlider("Exposure", { Title="Exposure", Default=initialLighting.ExposureCompensation, Min=-3, Max=3, Rounding=2, Callback=function(v) Lighting.ExposureCompensation=v end })
+LightingSection:AddToggle("Shadows", { Title="Shadows", Default=initialLighting.GlobalShadows, Callback=function(state) Lighting.GlobalShadows=state end })
 
 local UtilitySection = Tabs.Visual:AddSection("Utility")
 UtilitySection:AddButton({ Title="Reset All Visual", Callback=function()
@@ -1193,7 +1236,7 @@ UtilitySection:AddButton({ Title="Reset All Visual", Callback=function()
     Fluent:Notify({ Title="Visual Reset", Content="Lighting restored to original", Duration=3 })
 end})
 
--- ===== Settings & boot =====
+-- ===== settings & boot =====
 SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
 SaveManager:IgnoreThemeSettings()
@@ -1204,7 +1247,7 @@ InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
--- Chat commands
+-- small chat command to toggle GUI
 local function setupChatCommands()
     local function onChatted(message)
         local msg = message:lower()
@@ -1233,11 +1276,14 @@ LP.CharacterAdded:Connect(function(character)
         local humanoid = character:FindFirstChild("Humanoid")
         if humanoid then humanoid.WalkSpeed = currentSpeed end
     end
-    -- (Fly/Noclip reapply if needed handled by toggles on demand)
+    if flyActive then task.wait(0.5); if flyConnection then flyConnection:Disconnect(); flyConnection=nil end end
+    if noclipActive then task.wait(0.5); end
 end)
+
+Players.PlayerAdded:Connect(function(p) end)
 
 Fluent:Notify({ Title="Banana Eats Script", Content="Loaded", Duration=4 })
 Window:SelectTab(1)
 
--- Start readers
+-- start readers
 startComboWatcher()
