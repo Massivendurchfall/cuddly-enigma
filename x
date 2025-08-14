@@ -199,8 +199,6 @@ local autoDeletePeelsActive, autoDeletePeelsThread = false, nil
 local autoCollectCoinsActive, autoCollectCoinsThread = false, nil
 local autoDeleteLockersActive, autoDeleteLockersThread = false, nil
 local autoKillActive, autoKillThread = false, nil
-local autoEscapeActive, autoEscapeThread = false, nil
-local antiKickConnection = nil
 
 local autoBonusBarrelActive, autoBonusBarrelThread = false, nil
 local lastBonusClaim, bonusBarrelCooldown = 0, 2
@@ -216,6 +214,11 @@ local AC_CLICK_TIME_PER_PLATE = 2.5
 local AC_SCAN_INTERVAL        = 0.20
 local AC_EMPTY_SCANS_TO_EXIT  = 10
 local AC_GRACE_AFTER_PICK     = 0.70
+
+local escapeStatusParagraph = nil
+local autoEscapeMonitorEnabled, autoEscapeThread = false, nil
+local autoEscapeCooldownSeconds = 120
+local lastAutoEscapeTouch = 0
 
 local function clearAdornment(part, name) if part and part:FindFirstChild(name) then part[name]:Destroy() end end
 local function clearBillboard(part, name) if part and part:FindFirstChild(name) then part[name]:Destroy() end end
@@ -542,25 +545,56 @@ local function findEscapeTouchParts()
     return out
 end
 
-local function autoEscapeLoop()
-    while autoEscapeActive do
-        pcall(function()
-            local parts = findEscapeTouchParts()
-            if #parts > 0 then
-                for _, part in ipairs(parts) do fireTouch(part) end
-                local hrp = getHRP()
-                if hrp then
-                    for _, part in ipairs(parts) do
-                        if (hrp.Position - part.Position).Magnitude > 8 then
-                            hrp.CFrame = CFrame.new(part.Position + Vector3.new(0, 2, 0))
-                            task.wait(0.06)
-                            fireTouch(part)
+local function tryAutoEscapeOnce()
+    local parts = findEscapeTouchParts()
+    if #parts == 0 then return false end
+    local hrp = getHRP()
+    local touched = false
+    for _, part in ipairs(parts) do
+        if hrp and (hrp.Position - part.Position).Magnitude > 8 then
+            hrp.CFrame = CFrame.new(part.Position + Vector3.new(0, 2, 0))
+            task.wait(0.06)
+        end
+        fireTouch(part)
+        touched = true
+    end
+    return touched
+end
+
+local function updateEscapeUIStatus()
+    if not escapeStatusParagraph then return end
+    local left = math.max(0, autoEscapeCooldownSeconds - (tick() - lastAutoEscapeTouch))
+    if left > 0 then
+        escapeStatusParagraph:SetDesc("Cooldown: "..tostring(math.ceil(left)).."s")
+    else
+        escapeStatusParagraph:SetDesc("Ready")
+    end
+end
+
+local function setAutoEscapeMonitor(state)
+    if state and not autoEscapeMonitorEnabled then
+        autoEscapeMonitorEnabled = true
+        if autoEscapeThread then task.cancel(autoEscapeThread) end
+        autoEscapeThread = task.spawn(function()
+            while autoEscapeMonitorEnabled do
+                if LP.Team and LP.Team.Name == "Runners" then
+                    if (tick() - lastAutoEscapeTouch) >= autoEscapeCooldownSeconds then
+                        local ok = false
+                        pcall(function() ok = tryAutoEscapeOnce() end)
+                        if ok then
+                            lastAutoEscapeTouch = tick()
+                            Fluent:Notify({ Title="Auto Escape", Content="Exit touched. Cooldown started (120s).", Duration=3 })
                         end
                     end
                 end
+                updateEscapeUIStatus()
+                task.wait(0.5)
             end
         end)
-        task.wait(0.2)
+    end
+    if not state and autoEscapeMonitorEnabled then
+        autoEscapeMonitorEnabled = false
+        if autoEscapeThread then task.cancel(autoEscapeThread); autoEscapeThread=nil end
     end
 end
 
@@ -1184,29 +1218,23 @@ runner:AddToggle("AutoCoinsToggle", {
         end
     end
 })
-runner:AddToggle("AutoEscapeToggle", {
-    Title = "Auto Escape",
-    Default = false,
-    Callback = function(state)
-        autoEscapeActive = state
-        if state then
-            if autoEscapeThread then task.cancel(autoEscapeThread) end
-            autoEscapeThread = task.spawn(autoEscapeLoop)
-        else
-            if autoEscapeThread then task.cancel(autoEscapeThread); autoEscapeThread=nil end
+
+escapeStatusParagraph = runner:AddParagraph({ Title = "Auto Escape", Content = "Ready" })
+runner:AddButton({
+    Title = "Auto Escape (try)",
+    Callback = function()
+        if (tick() - lastAutoEscapeTouch) < autoEscapeCooldownSeconds then
+            updateEscapeUIStatus()
+            Fluent:Notify({ Title="Auto Escape", Content="On cooldown.", Duration=2 })
+            return
         end
-    end
-})
-runner:AddToggle("AutoBonusBarrelToggle", {
-    Title = "Auto Collect Bonus Barrel",
-    Default = false,
-    Callback = function(state)
-        autoBonusBarrelActive = state
-        if state then
-            if autoBonusBarrelThread then task.cancel(autoBonusBarrelThread) end
-            autoBonusBarrelThread = task.spawn(autoBonusBarrelLoop)
+        local ok = tryAutoEscapeOnce()
+        if ok then
+            lastAutoEscapeTouch = tick()
+            updateEscapeUIStatus()
+            Fluent:Notify({ Title="Auto Escape", Content="Exit touched. Cooldown started (120s).", Duration=3 })
         else
-            if autoBonusBarrelThread then task.cancel(autoBonusBarrelThread); autoBonusBarrelThread=nil end
+            Fluent:Notify({ Title="Auto Escape", Content="No exit found.", Duration=2 })
         end
     end
 })
@@ -1487,18 +1515,6 @@ local function setAutoBarrel(state)
     end
 end
 
-local function setAutoEscape(state)
-    if state and not autoEscapeActive then
-        autoEscapeActive = true
-        if autoEscapeThread then task.cancel(autoEscapeThread) end
-        autoEscapeThread = task.spawn(autoEscapeLoop)
-    end
-    if not state and autoEscapeActive then
-        autoEscapeActive = false
-        if autoEscapeThread then task.cancel(autoEscapeThread); autoEscapeThread=nil end
-    end
-end
-
 local function setDeletePeels(state)
     if state and not autoDeletePeelsActive then
         autoDeletePeelsActive = true
@@ -1550,9 +1566,9 @@ local function turnOffAllAutos()
     setAutoKill(false)
     setAutoCoins(false)
     setAutoBarrel(false)
-    setAutoEscape(false)
     setDeletePeels(false)
     setDeleteLockers(false)
+    setAutoEscapeMonitor(false)
     setFly(false)
     setNoclip(false)
 end
@@ -1585,6 +1601,7 @@ local function applyFarmForTeam()
     elseif team == "Runners" or team == "Team Runners" then
         updateFarmUI(team, "Preparing sequence")
         turnOffAllAutos()
+        setAutoEscapeMonitor(true)
         task.delay(3, function()
             if farmToken ~= token or currentTeamName() ~= team or not farmActive then return end
             local hrp = getHRP()
@@ -1595,7 +1612,7 @@ local function applyFarmForTeam()
             setAutoCoins(true)
             updateFarmUI(team, "Fly+Noclip+Collecting")
         end)
-        task.delay(15, function()
+        task.delay(20, function()
             if farmToken ~= token or currentTeamName() ~= team or not farmActive then return end
             enterCombinationOnce()
             instantFinishValve(4)
