@@ -229,6 +229,11 @@ local lastObservedCombo = nil
 local scheduleToken = 0
 local chatDelaySeconds = 30
 
+local AC_CLICK_TIME_PER_PLATE = 2.5   -- wie lange pro Plate geklickt wird
+local AC_SCAN_INTERVAL        = 0.2   -- wie oft wir die Items prüfen
+local AC_EMPTY_SCANS_TO_EXIT  = 10    -- wie viele leere Scans in Folge bis Rück-TP (~2s)
+local AC_GRACE_AFTER_PICK     = 0.7 
+
 -- ===== utility remove/clear =====
 local function clearAdornment(part, name) if part and part:FindFirstChild(name) then part[name]:Destroy() end end
 local function clearBillboard(part, name) if part and part:FindFirstChild(name) then part[name]:Destroy() end end
@@ -666,35 +671,54 @@ local function autoCakeOnce()
         return
     end
 
-    -- 1) Einmal zur Main-Plate teleportieren und dort bleiben
+    -- 1) Zur Main-Plate und dort stehen bleiben
     forceTP(CFrame.new(mainRoot.Position + Vector3.new(0, 3, 0)))
     task.wait(0.2)
 
-    -- 2) Solange es CakePlates in Items gibt, deren ClickDetector spammen
+    local emptyScans = 0
+    local lastPick   = 0
+
     while autoCakeActive do
-        local plates = getActiveCakePlates()
-        if #plates == 0 then break end
-
-        -- optional sortieren (nahe an Main-Plate zuerst)
-        table.sort(plates, function(a,b)
-            local aP = (a.cd.Parent and a.cd.Parent:IsA("BasePart")) and a.cd.Parent.Position or mainRoot.Position
-            local bP = (b.cd.Parent and b.cd.Parent:IsA("BasePart")) and b.cd.Parent.Position or mainRoot.Position
-            return (aP - mainRoot.Position).Magnitude < (bP - mainRoot.Position).Magnitude
-        end)
-
-        for _, entry in ipairs(plates) do
-            if not autoCakeActive then break end
-            clickUntilGone(entry, 2.5)
-            task.wait(0.1)
+        -- kleine „Gnadenzeit“ nach letztem Pick, damit neue Plates erscheinen können
+        if tick() - lastPick < AC_GRACE_AFTER_PICK then
+            task.wait(AC_SCAN_INTERVAL)
         end
-        task.wait(0.2)
+
+        -- aktuelle Plates einsammeln
+        local plates = getActiveCakePlates()
+
+        if #plates == 0 then
+            emptyScans += 1
+            if emptyScans >= AC_EMPTY_SCANS_TO_EXIT then
+                break -- wirklich nichts mehr da → zurück
+            end
+            task.wait(AC_SCAN_INTERVAL)
+        else
+            emptyScans = 0
+
+            -- optional sortieren nach Nähe zur Main-Plate
+            table.sort(plates, function(a,b)
+                local ap = (a.cd.Parent and a.cd.Parent:IsA("BasePart")) and a.cd.Parent.Position or mainRoot.Position
+                local bp = (b.cd.Parent and b.cd.Parent:IsA("BasePart")) and b.cd.Parent.Position or mainRoot.Position
+                return (ap - mainRoot.Position).Magnitude < (bp - mainRoot.Position).Magnitude
+            end)
+
+            -- nacheinander klicken (jedes verschwindet danach aus Items)
+            for _, entry in ipairs(plates) do
+                if not autoCakeActive then break end
+                clickUntilGone(entry, AC_CLICK_TIME_PER_PLATE)
+                lastPick = tick()
+                task.wait(AC_SCAN_INTERVAL)
+            end
+        end
     end
 
-    -- 3) Zurück zum Start
-    local now = getHRP()
-    if now then forceTP(startCF) end
+    -- 3) Zurück zum Start (nur wenn noch aktiv; sonst lässt man den Spieler stehen)
+    if autoCakeActive then
+        local now = getHRP()
+        if now then forceTP(startCF) end
+    end
 end
-
 -- ===== anti AFK / anti kick =====
 local antiAfkConnection = nil
 local function enableAntiAfk()
