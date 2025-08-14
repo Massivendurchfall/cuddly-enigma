@@ -215,10 +215,11 @@ local AC_SCAN_INTERVAL        = 0.20
 local AC_EMPTY_SCANS_TO_EXIT  = 10
 local AC_GRACE_AFTER_PICK     = 0.70
 
-local escapeStatusParagraph = nil
 local autoEscapeMonitorEnabled, autoEscapeThread = false, nil
 local autoEscapeCooldownSeconds = 120
 local lastAutoEscapeTouch = 0
+local antiKickConnection = nil
+local antiAfkConnection = nil
 
 local function clearAdornment(part, name) if part and part:FindFirstChild(name) then part[name]:Destroy() end end
 local function clearBillboard(part, name) if part and part:FindFirstChild(name) then part[name]:Destroy() end end
@@ -561,16 +562,6 @@ local function tryAutoEscapeOnce()
     return touched
 end
 
-local function updateEscapeUIStatus()
-    if not escapeStatusParagraph then return end
-    local left = math.max(0, autoEscapeCooldownSeconds - (tick() - lastAutoEscapeTouch))
-    if left > 0 then
-        escapeStatusParagraph:SetDesc("Cooldown: "..tostring(math.ceil(left)).."s")
-    else
-        escapeStatusParagraph:SetDesc("Ready")
-    end
-end
-
 local function setAutoEscapeMonitor(state)
     if state and not autoEscapeMonitorEnabled then
         autoEscapeMonitorEnabled = true
@@ -587,7 +578,6 @@ local function setAutoEscapeMonitor(state)
                         end
                     end
                 end
-                updateEscapeUIStatus()
                 task.wait(0.5)
             end
         end)
@@ -824,7 +814,6 @@ local function autoBonusBarrelLoop()
     end
 end
 
-local antiAfkConnection = nil
 local function enableAntiAfk()
     if antiAfkConnection then return end
     antiAfkConnection = LP.Idled:Connect(function()
@@ -1218,20 +1207,30 @@ runner:AddToggle("AutoCoinsToggle", {
         end
     end
 })
-
-escapeStatusParagraph = runner:AddParagraph({ Title = "Auto Escape", Content = "Ready" })
+runner:AddToggle("AutoBonusBarrelToggle", {
+    Title = "Auto Collect Bonus Barrel",
+    Default = false,
+    Callback = function(state)
+        if state then
+            if autoBonusBarrelThread then task.cancel(autoBonusBarrelThread) end
+            autoBonusBarrelActive = true
+            autoBonusBarrelThread = task.spawn(autoBonusBarrelLoop)
+        else
+            autoBonusBarrelActive = false
+            if autoBonusBarrelThread then task.cancel(autoBonusBarrelThread); autoBonusBarrelThread=nil end
+        end
+    end
+})
 runner:AddButton({
     Title = "Auto Escape (try)",
     Callback = function()
         if (tick() - lastAutoEscapeTouch) < autoEscapeCooldownSeconds then
-            updateEscapeUIStatus()
             Fluent:Notify({ Title="Auto Escape", Content="On cooldown.", Duration=2 })
             return
         end
         local ok = tryAutoEscapeOnce()
         if ok then
             lastAutoEscapeTouch = tick()
-            updateEscapeUIStatus()
             Fluent:Notify({ Title="Auto Escape", Content="Exit touched. Cooldown started (120s).", Duration=3 })
         else
             Fluent:Notify({ Title="Auto Escape", Content="No exit found.", Duration=2 })
