@@ -1612,7 +1612,7 @@ local function applyFarmForTeam()
             setAutoCoins(true)
             updateFarmUI(team, "Fly+Noclip+Collecting")
         end)
-        task.delay(20, function()
+        task.delay(25, function()
             if farmToken ~= token or currentTeamName() ~= team or not farmActive then return end
             enterCombinationOnce()
             instantFinishValve(4)
