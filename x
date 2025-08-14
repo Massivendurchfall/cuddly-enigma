@@ -732,11 +732,19 @@ local function enterCombinationOnce()
     Fluent:Notify({ Title="Combination", Content="Entered: "..desired, Duration=3 })
 end
 
-local function getPictureButtonsFolder()
+local function getAllPictureButtonsFolders()
+    local list = {}
     local gk = workspace:FindFirstChild("GameKeeper")
     local puzzles = gk and gk:FindFirstChild("Puzzles")
-    local root = puzzles and puzzles:FindFirstChild("PicturePuzzle")
-    return root and root:FindFirstChild("Buttons")
+    if puzzles then
+        for _, obj in ipairs(puzzles:GetDescendants()) do
+            if obj:IsA("Model") and obj.Name == "PicturePuzzle" then
+                local buttons = obj:FindFirstChild("Buttons")
+                if buttons then table.insert(list, buttons) end
+            end
+        end
+    end
+    return list
 end
 
 local function isTileGreen(btn)
@@ -759,32 +767,38 @@ local function rotateTileOnce(btn)
 end
 
 local function solvePicturePuzzleOnce()
-    local folder = getPictureButtonsFolder()
-    if not folder then
-        Fluent:Notify({ Title="Picture Puzzle", Content="Buttons folder not found.", Duration=3 })
+    local folders = getAllPictureButtonsFolders()
+    if #folders == 0 then
+        Fluent:Notify({ Title="Picture Puzzle", Content="No puzzles found.", Duration=3 })
         return
     end
-    for _, btn in ipairs(folder:GetChildren()) do
-        if btn:IsA("BasePart") or btn:IsA("MeshPart") then
-            local ri = btn:FindFirstChild("RotationIndex")
-            local try = 0
-            local ok = false
-            while try < 3 do
-                if (ri and ri.Value % 4 == 0) or isTileGreen(btn) then
-                    ok = true
-                    break
+    local solved = 0
+    for _, folder in ipairs(folders) do
+        for _, btn in ipairs(folder:GetChildren()) do
+            if btn:IsA("BasePart") or btn:IsA("MeshPart") then
+                local ri = btn:FindFirstChild("RotationIndex")
+                local try = 0
+                local ok = false
+                while try < 3 do
+                    if (ri and ri.Value % 4 == 0) or isTileGreen(btn) then
+                        ok = true
+                        break
+                    end
+                    rotateTileOnce(btn)
+                    try += 1
+                    task.wait(0.12)
+                end
+                if not ok and ri then
+                    local need = (4 - (ri.Value % 4)) % 4
+                    for i=1,need do rotateTileOnce(btn); task.wait(0.12) end
                 end
                 rotateTileOnce(btn)
-                try += 1
                 task.wait(0.12)
             end
-            if not ok and ri then
-                local need = (4 - (ri.Value % 4)) % 4
-                for i=1,need do rotateTileOnce(btn); task.wait(0.12) end
-            end
         end
+        solved += 1
     end
-    Fluent:Notify({ Title="Picture Puzzle", Content="Attempted solve.", Duration=3 })
+    Fluent:Notify({ Title="Picture Puzzle", Content="Attempted solve on "..tostring(solved).." puzzle(s).", Duration=3 })
 end
 
 local function autoBonusBarrelLoop()
