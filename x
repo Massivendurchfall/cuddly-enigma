@@ -221,6 +221,9 @@ local lastAutoEscapeTouch = 0
 local antiKickConnection = nil
 local antiAfkConnection = nil
 
+local autoKillInterval = 1
+local akIndex = 1
+
 local function clearAdornment(part, name) if part and part:FindFirstChild(name) then part[name]:Destroy() end end
 local function clearBillboard(part, name) if part and part:FindFirstChild(name) then part[name]:Destroy() end end
 local function removeCakeEsp() for part in pairs(cakeTargets) do if part and part.Parent then clearAdornment(part,"CakeESP"); clearBillboard(part,"CakeLabel") end end; cakeTargets = {} end
@@ -599,19 +602,6 @@ local function waitForPath(root, segments, timeout)
     return node
 end
 
-local function getMainPlateRoot()
-    local root = waitForPath(workspace, {"GameKeeper","Puzzles","CakePuzzle","Root"}, 5)
-    if root and root:IsA("BasePart") then return root end
-    local plate = waitForPath(workspace, {"GameKeeper","Puzzles","CakePuzzle","Plate"}, 5)
-    if plate and plate:IsA("BasePart") then return plate end
-    local puzzles = waitForPath(workspace, {"GameKeeper","Puzzles"}, 3)
-    if puzzles then
-        local fallback = puzzles:FindFirstChild("Root")
-        if fallback and fallback:IsA("BasePart") then return fallback end
-    end
-    return nil
-end
-
 local function getActiveCakePlates()
     local items = waitForPath(workspace, {"GameKeeper","Map","Items"}, 5)
     local list = {}
@@ -643,20 +633,28 @@ local function clickUntilGone(entry, timeout)
     end
 end
 
-local function autoCakeOnce()
-    local hrp = getHRP(); if not hrp then return end
-    local startCF = hrp.CFrame
-    local mainRoot = getMainPlateRoot()
-    if not mainRoot then
-        Fluent:Notify({ Title = "Auto Cake", Content = "Main plate not found.", Duration = 4 })
-        return
+local function getCakeDepositPart()
+    local gk = workspace:FindFirstChild("GameKeeper")
+    local puzzles = gk and gk:FindFirstChild("Puzzles")
+    local cp = puzzles and puzzles:FindFirstChild("CakePuzzle")
+    local root = cp and cp:FindFirstChild("Root")
+    return root
+end
+
+local function depositCakeTouch(times)
+    local part = getCakeDepositPart()
+    if not part then return end
+    for i=1,(times or 3) do
+        fireTouch(part)
+        task.wait(0.06)
     end
-    forceTP(CFrame.new(mainRoot.Position + Vector3.new(0, 3, 0)))
-    task.wait(0.25)
+end
+
+local function autoCakeOnce()
     local emptyScans = 0
-    local lastPick   = 0
+    local lastPick = 0
     while true do
-        if tick() - lastPick < 0.7 then
+        if tick() - lastPick < AC_GRACE_AFTER_PICK then
             task.wait(AC_SCAN_INTERVAL)
         end
         local plates = getActiveCakePlates()
@@ -668,20 +666,14 @@ local function autoCakeOnce()
             task.wait(AC_SCAN_INTERVAL)
         else
             emptyScans = 0
-            table.sort(plates, function(a,b)
-                local ap = (a.cd.Parent and a.cd.Parent:IsA("BasePart")) and a.cd.Parent.Position or mainRoot.Position
-                local bp = (b.cd.Parent and b.cd.Parent:IsA("BasePart")) and b.cd.Parent.Position or mainRoot.Position
-                return (ap - mainRoot.Position).Magnitude < (bp - mainRoot.Position).Magnitude
-            end)
             for _, entry in ipairs(plates) do
                 clickUntilGone(entry, AC_CLICK_TIME_PER_PLATE)
+                depositCakeTouch(3)
                 lastPick = tick()
                 task.wait(AC_SCAN_INTERVAL)
             end
         end
     end
-    local now = getHRP()
-    if now then forceTP(startCF) end
     Fluent:Notify({ Title="Auto Cake", Content="Done.", Duration=3 })
 end
 
@@ -845,6 +837,192 @@ local function startAntiKick()
     end
 end
 local function stopAntiKick() if antiKickConnection then antiKickConnection:Disconnect(); antiKickConnection=nil end end
+
+local setAutoKill
+local function getRunnersList()
+    local list = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Team and p.Team.Name == "Runners" then
+            local c = p.Character
+            local h = c and c:FindFirstChild("HumanoidRootPart")
+            if h then table.insert(list, {p=p, hrp=h}) end
+        end
+    end
+    table.sort(list, function(a,b) return a.p.UserId < b.p.UserId end)
+    return list
+end
+
+setAutoKill = function(state)
+    if state and not autoKillActive then
+        autoKillActive = true
+        if autoKillThread then task.cancel(autoKillThread) end
+        akIndex = 1
+        autoKillThread = task.spawn(function()
+            while autoKillActive do
+                if not (LP.Team and LP.Team.Name == "Banana") then
+                    task.wait(0.5)
+                else
+                    local runners = getRunnersList()
+                    if #runners == 0 then
+                        task.wait(0.4)
+                    else
+                        if akIndex > #runners then akIndex = 1 end
+                        local entry = runners[akIndex]
+                        akIndex = akIndex + 1
+                        local my = getHRP()
+                        if my and entry and entry.hrp and entry.hrp.Parent then
+                            my.CFrame = CFrame.new(entry.hrp.Position + Vector3.new(0, 2, 0))
+                        end
+                        task.wait(autoKillInterval)
+                    end
+                end
+            end
+        end)
+    end
+    if not state and autoKillActive then
+        autoKillActive = false
+        if autoKillThread then task.cancel(autoKillThread); autoKillThread=nil end
+    end
+end
+
+local function setFly(state)
+    if state and not flyActive then
+        local character = LP.Character
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            local root = character.HumanoidRootPart
+            flyBodyVelocity = Instance.new("BodyVelocity", root)
+            flyBodyVelocity.Velocity = Vector3.new(0,0,0)
+            flyBodyVelocity.MaxForce = Vector3.new(1e5,1e5,1e5)
+            flyBodyGyro = Instance.new("BodyGyro", root)
+            flyBodyGyro.MaxTorque = Vector3.new(1e5,1e5,1e5)
+            flyBodyGyro.CFrame = root.CFrame
+            flyActive = true
+            flyConnection = RunService.RenderStepped:Connect(function()
+                local dir = Vector3.new(0,0,0)
+                local cam = workspace.CurrentCamera
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0,1,0) end
+                if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0,1,0) end
+                flyBodyVelocity.Velocity = (dir.Magnitude>0) and dir.Unit * flySpeed or Vector3.new(0,0,0)
+                flyBodyGyro.CFrame = cam.CFrame
+            end)
+        end
+    end
+    if not state and flyActive then
+        flyActive = false
+        if flyBodyVelocity then flyBodyVelocity:Destroy(); flyBodyVelocity=nil end
+        if flyBodyGyro then flyBodyGyro:Destroy(); flyBodyGyro=nil end
+        if flyConnection then flyConnection:Disconnect(); flyConnection=nil end
+    end
+end
+
+local function setNoclip(state)
+    if state and not noclipActive then
+        noclipActive = true
+        noclipConnection = RunService.Stepped:Connect(function()
+            local character = LP.Character
+            if character then
+                for _, part in pairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") and part.CanCollide then
+                        noclipParts[part] = true
+                        part.CanCollide = false
+                    end
+                end
+            end
+        end)
+    end
+    if not state and noclipActive then
+        noclipActive = false
+        if noclipConnection then noclipConnection:Disconnect(); noclipConnection=nil end
+        for part in pairs(noclipParts) do if part and part.Parent then part.CanCollide = true end end
+        noclipParts = {}
+    end
+end
+
+local function setAutoCoins(state)
+    if state and not autoCollectCoinsActive then
+        autoCollectCoinsActive = true
+        if autoCollectCoinsThread then task.cancel(autoCollectCoinsThread) end
+        autoCollectCoinsThread = task.spawn(autoCollectCoinsFunc)
+    end
+    if not state and autoCollectCoinsActive then
+        autoCollectCoinsActive = false
+        if autoCollectCoinsThread then task.cancel(autoCollectCoinsThread); autoCollectCoinsThread=nil end
+    end
+end
+
+local function setAutoBarrel(state)
+    if state and not autoBonusBarrelActive then
+        autoBonusBarrelActive = true
+        if autoBonusBarrelThread then task.cancel(autoBonusBarrelThread) end
+        autoBonusBarrelThread = task.spawn(autoBonusBarrelLoop)
+    end
+    if not state and autoBonusBarrelActive then
+        autoBonusBarrelActive = false
+        if autoBonusBarrelThread then task.cancel(autoBonusBarrelThread); autoBonusBarrelThread=nil end
+    end
+end
+
+local function setDeletePeels(state)
+    if state and not autoDeletePeelsActive then
+        autoDeletePeelsActive = true
+        if autoDeletePeelsThread then task.cancel(autoDeletePeelsThread) end
+        autoDeletePeelsThread = task.spawn(function()
+            while autoDeletePeelsActive do
+                pcall(function()
+                    local peelsFolder = (workspace:FindFirstChild("GameKeeper")
+                        and workspace.GameKeeper:FindFirstChild("Map")
+                        and workspace.GameKeeper.Map:FindFirstChild("Peels")) or workspace:FindFirstChild("Peels")
+                    if peelsFolder then
+                        for _, peel in ipairs(peelsFolder:GetChildren()) do
+                            if peel and peel.Name:lower():find("peel") then pcall(function() peel:Destroy() end) end
+                        end
+                    end
+                end)
+                task.wait(4)
+            end
+        end)
+    end
+    if not state and autoDeletePeelsActive then
+        autoDeletePeelsActive = false
+        if autoDeletePeelsThread then task.cancel(autoDeletePeelsThread); autoDeletePeelsThread=nil end
+    end
+end
+
+local function setDeleteLockers(state)
+    if state and not autoDeleteLockersActive then
+        autoDeleteLockersActive = true
+        if autoDeleteLockersThread then task.cancel(autoDeleteLockersThread) end
+        autoDeleteLockersThread = task.spawn(function()
+            while autoDeleteLockersActive do
+                pcall(function()
+                    for _, d in ipairs(workspace:GetDescendants()) do
+                        if d and typeof(d.Name)=="string" and d.Name:lower():find("locker") then pcall(function() d:Destroy() end) end
+                    end
+                end)
+                task.wait(5)
+            end
+        end)
+    end
+    if not state and autoDeleteLockersActive then
+        autoDeleteLockersActive = false
+        if autoDeleteLockersThread then task.cancel(autoDeleteLockersThread); autoDeleteLockersThread=nil end
+    end
+end
+
+local function turnOffAllAutos()
+    setAutoKill(false)
+    setAutoCoins(false)
+    setAutoBarrel(false)
+    setDeletePeels(false)
+    setDeleteLockers(false)
+    setAutoEscapeMonitor(false)
+    setFly(false)
+    setNoclip(false)
+end
 
 local ESPSection = Tabs.ESP:AddSection("ESP Toggles")
 local comboUI = ESPSection:AddParagraph({ Title = "Combination Code", Content = "—" })
@@ -1122,61 +1300,14 @@ killer:AddToggle("AutoKillToggle", {
     Title = "Auto Kill",
     Default = false,
     Callback = function(state)
-        autoKillActive = state
-        if state then
-            if autoKillThread then task.cancel(autoKillThread) end
-            autoKillThread = task.spawn(function()
-                while autoKillActive do
-                    pcall(function()
-                        local lp = LP
-                        local ch = lp.Character
-                        local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
-                        if hrp and lp.Team and lp.Team.Name == "Banana" then
-                            local targetPlayer, shortest = nil, math.huge
-                            for _, p in ipairs(Players:GetPlayers()) do
-                                if p ~= lp and p.Team and p.Team.Name == "Runners" then
-                                    local c = p.Character; local h = c and c:FindFirstChild("HumanoidRootPart")
-                                    if h then
-                                        local d = (hrp.Position - h.Position).Magnitude
-                                        if d < shortest then shortest = d; targetPlayer = p end
-                                    end
-                                end
-                            end
-                            if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                                local tgt = targetPlayer.Character.HumanoidRootPart.Position
-                                local my = getHRP()
-                                if my then my.CFrame = CFrame.new(tgt + Vector3.new(0, 2, 0)) end
-                            end
-                        end
-                    end)
-                    task.wait(0.6)
-                end
-            end)
-        else
-            if autoKillThread then task.cancel(autoKillThread); autoKillThread=nil end
-        end
+        setAutoKill(state)
     end
 })
 killer:AddToggle("DeleteLockersToggle", {
     Title = "Delete Lockers",
     Default = false,
     Callback = function(state)
-        autoDeleteLockersActive = state
-        if state then
-            if autoDeleteLockersThread then task.cancel(autoDeleteLockersThread) end
-            autoDeleteLockersThread = task.spawn(function()
-                while autoDeleteLockersActive do
-                    pcall(function()
-                        for _, d in ipairs(workspace:GetDescendants()) do
-                            if d and typeof(d.Name)=="string" and d.Name:lower():find("locker") then pcall(function() d:Destroy() end) end
-                        end
-                    end)
-                    task.wait(5)
-                end
-            end)
-        else
-            if autoDeleteLockersThread then task.cancel(autoDeleteLockersThread); autoDeleteLockersThread=nil end
-        end
+        setDeleteLockers(state)
     end
 })
 
@@ -1185,54 +1316,21 @@ runner:AddToggle("DeletePeelsToggle", {
     Title = "Delete Peels",
     Default = false,
     Callback = function(state)
-        autoDeletePeelsActive = state
-        if state then
-            if autoDeletePeelsThread then task.cancel(autoDeletePeelsThread) end
-            autoDeletePeelsThread = task.spawn(function()
-                while autoDeletePeelsActive do
-                    pcall(function()
-                        local peelsFolder = (workspace:FindFirstChild("GameKeeper")
-                            and workspace.GameKeeper:FindFirstChild("Map")
-                            and workspace.GameKeeper.Map:FindFirstChild("Peels")) or workspace:FindFirstChild("Peels")
-                        if peelsFolder then
-                            for _, peel in ipairs(peelsFolder:GetChildren()) do
-                                if peel and peel.Name:lower():find("peel") then pcall(function() peel:Destroy() end) end
-                            end
-                        end
-                    end)
-                    task.wait(4)
-                end
-            end)
-        else
-            if autoDeletePeelsThread then task.cancel(autoDeletePeelsThread); autoDeletePeelsThread=nil end
-        end
+        setDeletePeels(state)
     end
 })
 runner:AddToggle("AutoCoinsToggle", {
     Title = "Auto Collect Coins",
     Default = false,
     Callback = function(state)
-        autoCollectCoinsActive = state
-        if state then
-            if autoCollectCoinsThread then task.cancel(autoCollectCoinsThread) end
-            autoCollectCoinsThread = task.spawn(autoCollectCoinsFunc)
-        else
-            if autoCollectCoinsThread then task.cancel(autoCollectCoinsThread); autoCollectCoinsThread=nil end
-        end
+        setAutoCoins(state)
     end
 })
 runner:AddToggle("AutoBonusBarrelToggle", {
     Title = "Auto Collect Bonus Barrel",
     Default = false,
     Callback = function(state)
-        if state then
-            if autoBonusBarrelThread then task.cancel(autoBonusBarrelThread) end
-            autoBonusBarrelActive = true
-            autoBonusBarrelThread = task.spawn(autoBonusBarrelLoop)
-        else
-            autoBonusBarrelActive = false
-            if autoBonusBarrelThread then task.cancel(autoBonusBarrelThread); autoBonusBarrelThread=nil end
-        end
+        setAutoBarrel(state)
     end
 })
 runner:AddButton({
@@ -1408,183 +1506,6 @@ LP.CharacterAdded:Connect(function(character)
     if flyActive then task.wait(0.5); if flyConnection then flyConnection:Disconnect(); flyConnection=nil end end
     if noclipActive then task.wait(0.5); end
 end)
-
-local function setFly(state)
-    if state and not flyActive then
-        local character = LP.Character
-        if character and character:FindFirstChild("HumanoidRootPart") then
-            local root = character.HumanoidRootPart
-            flyBodyVelocity = Instance.new("BodyVelocity", root)
-            flyBodyVelocity.Velocity = Vector3.new(0,0,0)
-            flyBodyVelocity.MaxForce = Vector3.new(1e5,1e5,1e5)
-            flyBodyGyro = Instance.new("BodyGyro", root)
-            flyBodyGyro.MaxTorque = Vector3.new(1e5,1e5,1e5)
-            flyBodyGyro.CFrame = root.CFrame
-            flyActive = true
-            flyConnection = RunService.RenderStepped:Connect(function()
-                local dir = Vector3.new(0,0,0)
-                local cam = workspace.CurrentCamera
-                if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0,1,0) end
-                if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0,1,0) end
-                flyBodyVelocity.Velocity = (dir.Magnitude>0) and dir.Unit * flySpeed or Vector3.new(0,0,0)
-                flyBodyGyro.CFrame = cam.CFrame
-            end)
-        end
-    end
-    if not state and flyActive then
-        flyActive = false
-        if flyBodyVelocity then flyBodyVelocity:Destroy(); flyBodyVelocity=nil end
-        if flyBodyGyro then flyBodyGyro:Destroy(); flyBodyGyro=nil end
-        if flyConnection then flyConnection:Disconnect(); flyConnection=nil end
-    end
-end
-
-local function setNoclip(state)
-    if state and not noclipActive then
-        noclipActive = true
-        noclipConnection = RunService.Stepped:Connect(function()
-            local character = LP.Character
-            if character then
-                for _, part in pairs(character:GetDescendants()) do
-                    if part:IsA("BasePart") and part.CanCollide then
-                        noclipParts[part] = true
-                        part.CanCollide = false
-                    end
-                end
-            end
-        end)
-    end
-    if not state and noclipActive then
-        noclipActive = false
-        if noclipConnection then noclipConnection:Disconnect(); noclipConnection=nil end
-        for part in pairs(noclipParts) do if part and part.Parent then part.CanCollide = true end end
-        noclipParts = {}
-    end
-end
-
-local function setAutoKill(state)
-    if state and not autoKillActive then
-        autoKillActive = true
-        if autoKillThread then task.cancel(autoKillThread) end
-        autoKillThread = task.spawn(function()
-            while autoKillActive do
-                pcall(function()
-                    local lp = LP
-                    local ch = lp.Character
-                    local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
-                    if hrp and lp.Team and lp.Team.Name == "Banana" then
-                        local targetPlayer, shortest = nil, math.huge
-                        for _, p in ipairs(Players:GetPlayers()) do
-                            if p ~= lp and p.Team and p.Team.Name == "Runners" then
-                                local c = p.Character; local h = c and c:FindFirstChild("HumanoidRootPart")
-                                if h then
-                                    local d = (hrp.Position - h.Position).Magnitude
-                                    if d < shortest then shortest = d; targetPlayer = p end
-                                end
-                            end
-                        end
-                        if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                            local tgt = targetPlayer.Character.HumanoidRootPart.Position
-                            local my = getHRP()
-                            if my then my.CFrame = CFrame.new(tgt + Vector3.new(0, 2, 0)) end
-                        end
-                    end
-                end)
-                task.wait(0.6)
-            end
-        end)
-    end
-    if not state and autoKillActive then
-        autoKillActive = false
-        if autoKillThread then task.cancel(autoKillThread); autoKillThread=nil end
-    end
-end
-
-local function setAutoCoins(state)
-    if state and not autoCollectCoinsActive then
-        autoCollectCoinsActive = true
-        if autoCollectCoinsThread then task.cancel(autoCollectCoinsThread) end
-        autoCollectCoinsThread = task.spawn(autoCollectCoinsFunc)
-    end
-    if not state and autoCollectCoinsActive then
-        autoCollectCoinsActive = false
-        if autoCollectCoinsThread then task.cancel(autoCollectCoinsThread); autoCollectCoinsThread=nil end
-    end
-end
-
-local function setAutoBarrel(state)
-    if state and not autoBonusBarrelActive then
-        autoBonusBarrelActive = true
-        if autoBonusBarrelThread then task.cancel(autoBonusBarrelThread) end
-        autoBonusBarrelThread = task.spawn(autoBonusBarrelLoop)
-    end
-    if not state and autoBonusBarrelActive then
-        autoBonusBarrelActive = false
-        if autoBonusBarrelThread then task.cancel(autoBonusBarrelThread); autoBonusBarrelThread=nil end
-    end
-end
-
-local function setDeletePeels(state)
-    if state and not autoDeletePeelsActive then
-        autoDeletePeelsActive = true
-        if autoDeletePeelsThread then task.cancel(autoDeletePeelsThread) end
-        autoDeletePeelsThread = task.spawn(function()
-            while autoDeletePeelsActive do
-                pcall(function()
-                    local peelsFolder = (workspace:FindFirstChild("GameKeeper")
-                        and workspace.GameKeeper:FindFirstChild("Map")
-                        and workspace.GameKeeper.Map:FindFirstChild("Peels")) or workspace:FindFirstChild("Peels")
-                    if peelsFolder then
-                        for _, peel in ipairs(peelsFolder:GetChildren()) do
-                            if peel and peel.Name:lower():find("peel") then pcall(function() peel:Destroy() end) end
-                        end
-                    end
-                end)
-                task.wait(4)
-            end
-        end)
-    end
-    if not state and autoDeletePeelsActive then
-        autoDeletePeelsActive = false
-        if autoDeletePeelsThread then task.cancel(autoDeletePeelsThread); autoDeletePeelsThread=nil end
-    end
-end
-
-local function setDeleteLockers(state)
-    if state and not autoDeleteLockersActive then
-        autoDeleteLockersActive = true
-        if autoDeleteLockersThread then task.cancel(autoDeleteLockersThread) end
-        autoDeleteLockersThread = task.spawn(function()
-            while autoDeleteLockersActive do
-                pcall(function()
-                    for _, d in ipairs(workspace:GetDescendants()) do
-                        if d and typeof(d.Name)=="string" and d.Name:lower():find("locker") then pcall(function() d:Destroy() end) end
-                    end
-                end)
-                task.wait(5)
-            end
-        end)
-    end
-    if not state and autoDeleteLockersActive then
-        autoDeleteLockersActive = false
-        if autoDeleteLockersThread then task.cancel(autoDeleteLockersThread); autoDeleteLockersThread=nil end
-    end
-end
-
-local function turnOffAllAutos()
-    setAutoKill(false)
-    setAutoCoins(false)
-    setAutoBarrel(false)
-    setDeletePeels(false)
-    setDeleteLockers(false)
-    setAutoEscapeMonitor(false)
-    setFly(false)
-    setNoclip(false)
-end
 
 local farmSection = Tabs.Farm:AddSection("Farm Mode")
 local farmTeamParagraph = farmSection:AddParagraph({ Title = "Team", Content = "—" })
