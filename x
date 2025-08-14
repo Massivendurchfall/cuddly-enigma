@@ -219,6 +219,10 @@ local autoKillActive, autoKillThread = false, nil
 local autoEscapeActive, autoEscapeThread = false, nil
 local antiKickConnection = nil
 
+-- NEW: Bonus Barrel
+local autoBonusBarrelActive, autoBonusBarrelThread = false, nil
+local lastBonusClaim, bonusBarrelCooldown = 0, 2
+
 -- Auto Chat
 local autoChatComboActive = false
 local autoChatWatcher = nil
@@ -664,7 +668,7 @@ local function autoCakeOnce()
     local lastPick   = 0
 
     while true do
-        if tick() - lastPick < AC_GRACE_AFTER_PICK then
+        if tick() - lastPick < 0.7 then
             task.wait(AC_SCAN_INTERVAL)
         end
 
@@ -712,13 +716,12 @@ local function readDialDigit(dial)
 end
 
 local function pressDialTo(dial, targetDigit)
-    -- Digits expected 1..9, cycle upwards on each click. Fallback modulo 9.
     targetDigit = math.clamp(tonumber(targetDigit) or 1, 1, 9)
     local cd = dial and dial:FindFirstChildOfClass("ClickDetector") or dial:FindFirstChildWhichIsA("ClickDetector", true)
     if not cd then return end
     local cur = readDialDigit(dial)
     local delta = (targetDigit - cur) % 9
-    for i = 1, delta do
+    for _ = 1, delta do
         pcall(function()
             if cd.MaxActivationDistance then cd.MaxActivationDistance = math.huge end
             fireclickdetector(cd)
@@ -758,7 +761,6 @@ local function isTileGreen(btn)
     local img = ui and ui:FindFirstChild("ImageLabel")
     if img and img:IsA("ImageLabel") then
         local c = img.ImageColor3 or Color3.new(1,1,1)
-        -- consider "green-ish"
         return (c.G > 0.75 and c.R < 0.5 and c.B < 0.5)
     end
     return false
@@ -779,7 +781,6 @@ local function solvePicturePuzzleOnce()
         Fluent:Notify({ Title="Picture Puzzle", Content="Buttons folder not found.", Duration=3 })
         return
     end
-    -- Try make all green or RotationIndex == 0
     for _, btn in ipairs(folder:GetChildren()) do
         if btn:IsA("BasePart") or btn:IsA("MeshPart") then
             local ri = btn:FindFirstChild("RotationIndex")
@@ -794,16 +795,41 @@ local function solvePicturePuzzleOnce()
                 try += 1
                 task.wait(0.12)
             end
-            if not ok then
-                -- final normalization to index 0 if we can read RotationIndex
-                if ri then
-                    local need = (4 - (ri.Value % 4)) % 4
-                    for i=1,need do rotateTileOnce(btn); task.wait(0.12) end
-                end
+            if not ok and ri then
+                local need = (4 - (ri.Value % 4)) % 4
+                for i=1,need do rotateTileOnce(btn); task.wait(0.12) end
             end
         end
     end
     Fluent:Notify({ Title="Picture Puzzle", Content="Attempted solve.", Duration=3 })
+end
+
+--// Bonus Barrel (auto)
+local function autoBonusBarrelLoop()
+    while autoBonusBarrelActive do
+        pcall(function()
+            local bb = workspace:FindFirstChild("BonusBarrel")
+            if not bb then return end
+            local hl = bb:FindFirstChild("ClaimHighlight")
+            local ready = false
+            if hl then
+                local ok1, en = pcall(function() return hl.Enabled end)
+                if ok1 and en == true then ready = true end
+                if not ready then
+                    local ok2, vis = pcall(function() return hl.Visible end)
+                    if ok2 and vis == true then ready = true end
+                end
+            end
+            if ready and (tick() - lastBonusClaim) > bonusBarrelCooldown then
+                local root = bb:FindFirstChild("Root")
+                if root and (root:FindFirstChild("TouchInterest") or root:FindFirstChildOfClass("TouchTransmitter")) then
+                    for i=1,4 do fireTouch(root); task.wait(0.06) end
+                    lastBonusClaim = tick()
+                end
+            end
+        end)
+        task.wait(0.2)
+    end
 end
 
 --// Anti AFK / Anti Kick
@@ -1218,6 +1244,19 @@ runner:AddToggle("AutoEscapeToggle", {
         end
     end
 })
+runner:AddToggle("AutoBonusBarrelToggle", {
+    Title = "Auto Collect Bonus Barrel",
+    Default = false,
+    Callback = function(state)
+        autoBonusBarrelActive = state
+        if state then
+            if autoBonusBarrelThread then task.cancel(autoBonusBarrelThread) end
+            autoBonusBarrelThread = task.spawn(autoBonusBarrelLoop)
+        else
+            if autoBonusBarrelThread then task.cancel(autoBonusBarrelThread); autoBonusBarrelThread=nil end
+        end
+    end
+})
 
 local puzzles = Tabs.Auto:AddSection("Puzzles")
 puzzles:AddButton({ Title="Auto Cake (run once)", Callback=autoCakeOnce })
@@ -1225,7 +1264,6 @@ puzzles:AddButton({ Title="Enter Combination Code (once)", Callback=enterCombina
 puzzles:AddButton({ Title="Solve Picture Puzzle (once)", Callback=solvePicturePuzzleOnce })
 puzzles:AddButton({ Title="Instant Finish Valve", Callback=function() instantFinishValve(4) end })
 
--- Auto Chat Combination (cooldown)
 puzzles:AddToggle("AutoChatComboToggle", {
     Title = "Auto Chat Combination (30s cooldown)",
     Default = false,
