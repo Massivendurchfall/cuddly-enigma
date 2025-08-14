@@ -1,12 +1,12 @@
--- Banana Eats Script - by Massivendurchfall
--- Full build: ESPs, Player tools, Auto (Cake/Coins/Escape/Kill/Lockers/Peels/Valve),
--- Puzzles (Enter Combination, Solve Picture), Mobile toggle, Anti-AFK/Kick, Visuals
--- UI in English, Auto tab grouped, no AddDivider usage
+-- Banana Eats Script - by Massivendurchfall (full build, EN)
+-- UI: Fluent (https://github.com/dawid-scripts/Fluent)
 
+--// Libraries
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
+--// Services
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
@@ -14,12 +14,12 @@ local VirtualUser = game:GetService("VirtualUser")
 local Lighting = game:GetService("Lighting")
 local TextChatService = game:GetService("TextChatService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
 local LP = Players.LocalPlayer
+
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 local isGuiVisible = true
 
--- ===== lighting backup =====
+--// Lighting backup
 local initialLighting = {
     Brightness = Lighting.Brightness,
     ClockTime = Lighting.ClockTime,
@@ -30,21 +30,15 @@ local initialLighting = {
     ExposureCompensation = Lighting.ExposureCompensation,
 }
 local function restoreLighting()
-    Lighting.Brightness = initialLighting.Brightness
-    Lighting.ClockTime = initialLighting.ClockTime
-    Lighting.FogStart = initialLighting.FogStart
-    Lighting.FogEnd = initialLighting.FogEnd
-    Lighting.GlobalShadows = initialLighting.GlobalShadows
-    Lighting.OutdoorAmbient = initialLighting.OutdoorAmbient
-    Lighting.ExposureCompensation = initialLighting.ExposureCompensation
+    for k, v in pairs(initialLighting) do pcall(function() Lighting[k] = v end) end
 end
 
--- ===== window =====
+--// Window
 local Window = Fluent:CreateWindow({
     Title = "Banana Eats Script",
     SubTitle = "by Massivendurchfall",
     TabWidth = 160,
-    Size = UDim2.fromOffset(600, 500),
+    Size = UDim2.fromOffset(620, 520),
     Acrylic = true,
     Theme = "Dark",
     MinimizeKey = isMobile and nil or Enum.KeyCode.LeftControl
@@ -53,12 +47,12 @@ local Window = Fluent:CreateWindow({
 local Tabs = {
     ESP = Window:AddTab({ Title = "ESP", Icon = "eye" }),
     Player = Window:AddTab({ Title = "Player", Icon = "user" }),
-    Auto = Window:AddTab({ Title = "Auto", Icon = "zap" }),
+    Auto = Window:AddTab({ Title = "Auto", Icon = "settings-2" }),
     Visual = Window:AddTab({ Title = "Visual", Icon = "sun" }),
-    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+    Settings = Window:AddTab({ Title = "Settings", Icon = "sliders" })
 }
 
--- ===== Mobile Toggle Button =====
+--// Mobile corner toggle button
 local mobileToggleBtn
 do
     if isMobile then
@@ -82,19 +76,23 @@ do
         btn.TextSize = 16
         btn.AutoButtonColor = true
         btn.Parent = sg
+
         Instance.new("UICorner", btn).CornerRadius = UDim.new(0,10)
-        local stroke = Instance.new("UIStroke", btn) stroke.Thickness = 1 stroke.Color = Color3.fromRGB(80,80,80)
+        local stroke = Instance.new("UIStroke", btn)
+        stroke.Thickness = 1
+        stroke.Color = Color3.fromRGB(80,80,80)
 
         btn.MouseButton1Click:Connect(function()
             isGuiVisible = not isGuiVisible
             if Window and Window.Root then Window.Root.Visible = isGuiVisible end
             btn.Text = "GUI: " .. (isGuiVisible and "ON" or "OFF")
         end)
+
         mobileToggleBtn = btn
     end
 end
 
--- ===== helpers =====
+--// Small helpers
 local function createBillboard(text)
     local billboard = Instance.new("BillboardGui")
     billboard.AlwaysOnTop = true
@@ -114,13 +112,13 @@ local function createBillboard(text)
     return billboard
 end
 
-local function makeBoxAdornment(part, name, color, sizeInflate)
+local function makeBoxAdornment(part, name, color, extra)
     local esp = Instance.new("BoxHandleAdornment")
     esp.Name = name
     esp.Adornee = part
     esp.AlwaysOnTop = true
     esp.ZIndex = 10
-    esp.Size = part.Size + (sizeInflate or Vector3.new(0.2,0.2,0.2))
+    esp.Size = part.Size + (extra or Vector3.new(0.2,0.2,0.2))
     esp.Transparency = 0.5
     esp.Color3 = color
     esp.Parent = part
@@ -147,8 +145,11 @@ local function forceTP(cf)
     if not c then return end
     local hum = c:FindFirstChildOfClass("Humanoid")
     local hrp = getHRP()
-    if hum then hum.Sit = false hum.PlatformStand = false end
-    for _=1,5 do
+    if hum then
+        hum.Sit = false
+        hum.PlatformStand = false
+    end
+    for _=1,6 do
         pcall(function() hrp.CFrame = cf end)
         task.wait(0.05)
         if (hrp.CFrame.Position - cf.Position).Magnitude < 1.5 then return end
@@ -158,31 +159,7 @@ local function forceTP(cf)
     end
 end
 
-local function fireTouch(part)
-    local hrp = getHRP(); if not hrp or not part or not part.Parent then return end
-    pcall(function()
-        firetouchinterest(hrp, part, 0)
-        task.wait(0.05)
-        firetouchinterest(hrp, part, 1)
-    end)
-end
-
-local function fireClick(root)
-    if not root or not root.Parent then return end
-    for _, d in ipairs(root:GetDescendants()) do
-        if d:IsA("ClickDetector") then
-            pcall(function() if d.MaxActivationDistance then d.MaxActivationDistance = math.huge end; fireclickdetector(d) end)
-        elseif d:IsA("ProximityPrompt") then
-            pcall(function() fireproximityprompt(d, 1) end)
-        end
-    end
-    local cd = root:FindFirstChildWhichIsA("ClickDetector")
-    if cd then pcall(function() if cd.MaxActivationDistance then cd.MaxActivationDistance = math.huge end; fireclickdetector(cd) end) end
-    local pp = root:FindFirstChildWhichIsA("ProximityPrompt")
-    if pp then pcall(function() fireproximityprompt(pp, 1) end) end
-end
-
--- ===== caches / toggles =====
+--// Caches / toggles
 local cakeEspActive, cakeLoop, cakeConnAdd, cakeConnRem = false, nil, nil, nil
 local cakeEspColor = Color3.fromRGB(255,255,0)
 local cakeTargets = {}
@@ -206,6 +183,7 @@ local puzzleNumberEspColor = Color3.fromRGB(255,255,255)
 local puzzleNumbers = {["23"]=true,["34"]=true,["31"]=true}
 local puzzleNumberTargets = {}
 
+-- Combination Code (label + reading)
 local comboLabelEspActive = false
 local codePuzzleLabelAttached = false
 local codePuzzleConnAdd = nil
@@ -215,7 +193,7 @@ local comboParagraph
 local comboLoop = nil
 local comboCurrentCode = nil
 
--- movement
+-- Movement
 local speedLoop = nil
 local currentSpeed = 16
 local flyActive = false
@@ -225,7 +203,7 @@ local noclipActive = false
 local noclipConnection = nil
 local noclipParts = {}
 
--- visuals
+-- Visuals
 local fullbrightActive = false
 local noFogActive, noFogLoop = false, nil
 local ccActive, ccEffect = false, nil
@@ -233,16 +211,15 @@ local ccBrightness, ccContrast, ccSaturation = 0,0,1
 local sunRaysActive, sunRaysEffect = false, nil
 local sunRaysIntensity = 0.3
 
--- autos
+-- Autos
 local autoDeletePeelsActive, autoDeletePeelsThread = false, nil
 local autoCollectCoinsActive, autoCollectCoinsThread = false, nil
 local autoDeleteLockersActive, autoDeleteLockersThread = false, nil
 local autoKillActive, autoKillThread = false, nil
 local autoEscapeActive, autoEscapeThread = false, nil
-local autoCakeActive, autoCakeThread = false, nil
 local antiKickConnection = nil
 
--- chat/combo
+-- Auto Chat
 local autoChatComboActive = false
 local autoChatWatcher = nil
 local lastSentCombo = nil
@@ -250,32 +227,19 @@ local lastObservedCombo = nil
 local scheduleToken = 0
 local chatDelaySeconds = 30
 
--- Auto Cake timings
+-- Auto Cake tunables
 local AC_CLICK_TIME_PER_PLATE = 2.5
-local AC_SCAN_INTERVAL        = 0.2
+local AC_SCAN_INTERVAL        = 0.20
 local AC_EMPTY_SCANS_TO_EXIT  = 10
-local AC_GRACE_AFTER_PICK     = 0.7
+local AC_GRACE_AFTER_PICK     = 0.70
 
--- ===== utility remove/clear =====
+--// Cleanup helpers
 local function clearAdornment(part, name) if part and part:FindFirstChild(name) then part[name]:Destroy() end end
 local function clearBillboard(part, name) if part and part:FindFirstChild(name) then part[name]:Destroy() end end
-
-local function removeCakeEsp()
-    for part in pairs(cakeTargets) do if part and part.Parent then clearAdornment(part,"CakeESP"); clearBillboard(part,"CakeLabel") end end
-    cakeTargets = {}
-end
-local function removeCoinEsp()
-    for part in pairs(coinTargets) do if part and part.Parent then clearAdornment(part,"CoinESP"); clearBillboard(part,"CoinLabel") end end
-    coinTargets = {}
-end
-local function removeValveEsp()
-    for part in pairs(valveTargets) do if part and part.Parent then clearAdornment(part,"ValveESP"); clearBillboard(part,"ValveLabel") end end
-    valveTargets = {}
-end
-local function removePuzzleNumberEsp()
-    for part in pairs(puzzleNumberTargets) do if part and part.Parent then clearAdornment(part,"PuzzleNumberESP"); clearBillboard(part,"PuzzleNumberLabel") end end
-    puzzleNumberTargets = {}
-end
+local function removeCakeEsp() for part in pairs(cakeTargets) do if part and part.Parent then clearAdornment(part,"CakeESP"); clearBillboard(part,"CakeLabel") end end; cakeTargets = {} end
+local function removeCoinEsp() for part in pairs(coinTargets) do if part and part.Parent then clearAdornment(part,"CoinESP"); clearBillboard(part,"CoinLabel") end end; coinTargets = {} end
+local function removeValveEsp() for part in pairs(valveTargets) do if part and part.Parent then clearAdornment(part,"ValveESP"); clearBillboard(part,"ValveLabel") end end; valveTargets = {} end
+local function removePuzzleNumberEsp() for part in pairs(puzzleNumberTargets) do if part and part.Parent then clearAdornment(part,"PuzzleNumberESP"); clearBillboard(part,"PuzzleNumberLabel") end end; puzzleNumberTargets = {} end
 
 local function removeChams()
     for _, plyr in pairs(Players:GetPlayers()) do
@@ -295,7 +259,7 @@ local function removeNametags()
     end
 end
 
--- ===== predicates =====
+--// Predicates
 local function isCakePart(obj)
     if not obj:IsA("BasePart") then return false end
     local p = obj.Parent
@@ -326,7 +290,7 @@ local function isPuzzleNumber(obj)
     return parent and parent.Name=="Buttons" and puzzleNumbers[obj.Name]==true
 end
 
--- ===== workspace hooks =====
+--// Workspace hooks
 local function initialScanAndCache(predicate, cacheTable)
     for _, obj in ipairs(workspace:GetDescendants()) do
         if predicate(obj) then cacheTable[obj] = true end
@@ -344,7 +308,7 @@ local function hookWorkspace(predicate, cacheTable, onAddRef, onRemRef)
     return addConn, remConn
 end
 
--- ===== ESP loops =====
+--// ESP loops
 local function cakeEspLoopFunction()
     local waitTime = isMobile and 0.5 or 0.25
     while cakeEspActive do
@@ -400,7 +364,7 @@ local function puzzleNumberEspLoopFunction()
     end
 end
 
--- ===== Combination puzzle helpers =====
+--// Combination puzzle helpers
 local function findCombinationPuzzleModel()
     local gk = workspace:FindFirstChild("GameKeeper")
     if not gk then return nil end
@@ -493,7 +457,7 @@ local function startComboWatcher()
     end)
 end
 
--- ===== chat helper =====
+--// Chat helper
 local function sendChatMessage(msg)
     local ok = false
     pcall(function()
@@ -513,7 +477,7 @@ local function sendChatMessage(msg)
     return ok
 end
 
--- ===== valves =====
+--// Valves
 local function collectValveActivators()
     local out = {}
     local gk = workspace:FindFirstChild("GameKeeper")
@@ -559,7 +523,17 @@ local function instantFinishValve(duration)
     end
 end
 
--- ===== coins via touch (no TP required) =====
+--// Touch utility
+local function fireTouch(part)
+    local hrp = getHRP(); if not hrp or not part or not part.Parent then return end
+    pcall(function()
+        firetouchinterest(hrp, part, 0)
+        task.wait(0.05)
+        firetouchinterest(hrp, part, 1)
+    end)
+end
+
+--// Auto collect coins
 local function autoCollectCoinsFunc()
     while autoCollectCoinsActive do
         pcall(function()
@@ -578,7 +552,7 @@ local function autoCollectCoinsFunc()
     end
 end
 
--- ===== Auto Escape =====
+--// Auto Escape
 local function findEscapeTouchParts()
     local out = {}
     local gk = workspace:FindFirstChild("GameKeeper"); if not gk then return out end
@@ -616,7 +590,7 @@ local function autoEscapeLoop()
     end
 end
 
--- ===== Auto Cake =====
+--// Auto Cake (run once)
 local function waitForPath(root, segments, timeout)
     local t0 = tick()
     local node = root
@@ -651,7 +625,9 @@ local function getActiveCakePlates()
             root = root and root:FindFirstChild("CakePlate")
             root = root and root:FindFirstChild("Root")
             local cd = root and (root:FindFirstChildOfClass("ClickDetector") or root:FindFirstChildWhichIsA("ClickDetector", true))
-            if cd then table.insert(list, {inst = cp, cd = cd}) end
+            if cd then
+                table.insert(list, {inst = cp, cd = cd})
+            end
         end
     end
     return list
@@ -680,16 +656,24 @@ local function autoCakeOnce()
         return
     end
 
+    -- Stand on main plate first
     forceTP(CFrame.new(mainRoot.Position + Vector3.new(0, 3, 0)))
-    task.wait(0.2)
+    task.wait(0.25)
 
-    local emptyScans, lastPick = 0, 0
-    while autoCakeActive do
-        if tick() - lastPick < AC_GRACE_AFTER_PICK then task.wait(AC_SCAN_INTERVAL) end
+    local emptyScans = 0
+    local lastPick   = 0
+
+    while true do
+        if tick() - lastPick < AC_GRACE_AFTER_PICK then
+            task.wait(AC_SCAN_INTERVAL)
+        end
+
         local plates = getActiveCakePlates()
         if #plates == 0 then
             emptyScans += 1
-            if emptyScans >= AC_EMPTY_SCANS_TO_EXIT then break end
+            if emptyScans >= AC_EMPTY_SCANS_TO_EXIT then
+                break
+            end
             task.wait(AC_SCAN_INTERVAL)
         else
             emptyScans = 0
@@ -699,7 +683,6 @@ local function autoCakeOnce()
                 return (ap - mainRoot.Position).Magnitude < (bp - mainRoot.Position).Magnitude
             end)
             for _, entry in ipairs(plates) do
-                if not autoCakeActive then break end
                 clickUntilGone(entry, AC_CLICK_TIME_PER_PLATE)
                 lastPick = tick()
                 task.wait(AC_SCAN_INTERVAL)
@@ -707,64 +690,123 @@ local function autoCakeOnce()
         end
     end
 
-    if autoCakeActive then
-        local now = getHRP()
-        if now then forceTP(startCF) end
+    -- Back to start
+    local now = getHRP()
+    if now then forceTP(startCF) end
+    Fluent:Notify({ Title="Auto Cake", Content="Done.", Duration=3 })
+end
+
+--// Enter Combination Code (run once, no TP)
+local function getDialFolder()
+    local cp = findCombinationPuzzleModel()
+    if not cp then return nil end
+    return cp:FindFirstChild("Buttons")
+end
+
+local function readDialDigit(dial)
+    local bl = dial and dial:FindFirstChild("ButtonLabel")
+    local lbl = bl and bl:FindFirstChild("Label")
+    local txt = lbl and (lbl.Text or "")
+    local n = tonumber(tostring(txt):match("(%d)%s*$") or "")
+    return n or 1
+end
+
+local function pressDialTo(dial, targetDigit)
+    -- Digits expected 1..9, cycle upwards on each click. Fallback modulo 9.
+    targetDigit = math.clamp(tonumber(targetDigit) or 1, 1, 9)
+    local cd = dial and dial:FindFirstChildOfClass("ClickDetector") or dial:FindFirstChildWhichIsA("ClickDetector", true)
+    if not cd then return end
+    local cur = readDialDigit(dial)
+    local delta = (targetDigit - cur) % 9
+    for i = 1, delta do
+        pcall(function()
+            if cd.MaxActivationDistance then cd.MaxActivationDistance = math.huge end
+            fireclickdetector(cd)
+        end)
+        task.wait(0.12)
     end
 end
 
--- ===== Puzzles: Enter Combination Code (Once) =====
-local function enterCombinationCodeOnce()
-    local code = readCombinationCode()
-    if not code or #code ~= 3 then
-        Fluent:Notify({ Title="Combination", Content="Failed to read target code.", Duration=3 })
+local function enterCombinationOnce()
+    local desired = readCombinationCode()
+    if not desired or #desired ~= 3 then
+        Fluent:Notify({ Title="Combination", Content="Code not visible.", Duration=3 })
         return
     end
-    local gk = workspace:FindFirstChild("GameKeeper"); if not gk then return end
-    local puzzles = gk:FindFirstChild("Puzzles"); if not puzzles then return end
-    local cp = puzzles:FindFirstChild("CombinationPuzzle"); if not cp then return end
-    local buttons = cp:FindFirstChild("Buttons"); if not buttons then return end
-
-    for i=1,3 do
-        local target = tonumber(code:sub(i,i)) or 1
-        local presses = math.clamp(target - 1, 0, 9)
-        local btn = buttons:FindFirstChild("Button"..i)
-        local cd = btn and btn:FindFirstChildOfClass("ClickDetector")
-        if cd and cd.MaxActivationDistance then cd.MaxActivationDistance = math.huge end
-        for _=1,presses do
-            pcall(function() if cd then fireclickdetector(cd) else fireClick(btn) end end)
-            task.wait(0.1)
-        end
+    local buttons = getDialFolder()
+    if not buttons then
+        Fluent:Notify({ Title="Combination", Content="Dial folder not found.", Duration=3 })
+        return
     end
-    Fluent:Notify({ Title="Combination", Content="Entered code: "..code, Duration=3 })
+    for i = 1, 3 do
+        local dial = buttons:FindFirstChild("Button"..i)
+        if dial then pressDialTo(dial, tonumber(desired:sub(i,i))) end
+    end
+    Fluent:Notify({ Title="Combination", Content="Entered: "..desired, Duration=3 })
 end
 
--- ===== Puzzles: Picture Puzzle (Once) =====
-local function solvePicturePuzzleOnce()
-    local gk = workspace:FindFirstChild("GameKeeper"); if not gk then return end
-    local puzzles = gk:FindFirstChild("Puzzles"); if not puzzles then return end
-    local pp = puzzles:FindFirstChild("PicturePuzzle"); if not pp then return end
-    local buttons = pp:FindFirstChild("Buttons"); if not buttons then return end
+--// Picture Puzzle (run once)
+local function getPictureButtonsFolder()
+    local gk = workspace:FindFirstChild("GameKeeper")
+    local puzzles = gk and gk:FindFirstChild("Puzzles")
+    local root = puzzles and puzzles:FindFirstChild("PicturePuzzle")
+    return root and root:FindFirstChild("Buttons")
+end
 
-    for _, tile in ipairs(buttons:GetChildren()) do
-        if tile:IsA("BasePart") or tile:IsA("MeshPart") then
-            local cd = tile:FindFirstChildOfClass("ClickDetector")
-            local idx = tile:FindFirstChild("RotationIndex")
-            if cd and idx then
-                if cd.MaxActivationDistance then cd.MaxActivationDistance = math.huge end
-                local tries = 0
-                while idx.Value ~= 0 and tries < 5 do
-                    pcall(function() fireclickdetector(cd) end)
-                    tries += 1
-                    task.wait(0.1)
+local function isTileGreen(btn)
+    local ui = btn:FindFirstChild("ButtonLabel")
+    local img = ui and ui:FindFirstChild("ImageLabel")
+    if img and img:IsA("ImageLabel") then
+        local c = img.ImageColor3 or Color3.new(1,1,1)
+        -- consider "green-ish"
+        return (c.G > 0.75 and c.R < 0.5 and c.B < 0.5)
+    end
+    return false
+end
+
+local function rotateTileOnce(btn)
+    local cd = btn:FindFirstChildOfClass("ClickDetector") or btn:FindFirstChildWhichIsA("ClickDetector", true)
+    if not cd then return end
+    pcall(function()
+        if cd.MaxActivationDistance then cd.MaxActivationDistance = math.huge end
+        fireclickdetector(cd)
+    end)
+end
+
+local function solvePicturePuzzleOnce()
+    local folder = getPictureButtonsFolder()
+    if not folder then
+        Fluent:Notify({ Title="Picture Puzzle", Content="Buttons folder not found.", Duration=3 })
+        return
+    end
+    -- Try make all green or RotationIndex == 0
+    for _, btn in ipairs(folder:GetChildren()) do
+        if btn:IsA("BasePart") or btn:IsA("MeshPart") then
+            local ri = btn:FindFirstChild("RotationIndex")
+            local try = 0
+            local ok = false
+            while try < 3 do
+                if (ri and ri.Value % 4 == 0) or isTileGreen(btn) then
+                    ok = true
+                    break
+                end
+                rotateTileOnce(btn)
+                try += 1
+                task.wait(0.12)
+            end
+            if not ok then
+                -- final normalization to index 0 if we can read RotationIndex
+                if ri then
+                    local need = (4 - (ri.Value % 4)) % 4
+                    for i=1,need do rotateTileOnce(btn); task.wait(0.12) end
                 end
             end
         end
     end
-    Fluent:Notify({ Title="Picture Puzzle", Content="Attempted auto-rotate", Duration=3 })
+    Fluent:Notify({ Title="Picture Puzzle", Content="Attempted solve.", Duration=3 })
 end
 
--- ===== anti AFK / anti kick =====
+--// Anti AFK / Anti Kick
 local antiAfkConnection = nil
 local function enableAntiAfk()
     if antiAfkConnection then return end
@@ -774,7 +816,6 @@ local function enableAntiAfk()
     end)
 end
 local function disableAntiAfk() if antiAfkConnection then antiAfkConnection:Disconnect(); antiAfkConnection=nil end end
-
 local function startAntiKick()
     if not antiKickConnection then
         antiKickConnection = LP.Idled:Connect(function()
@@ -785,19 +826,20 @@ local function startAntiKick()
 end
 local function stopAntiKick() if antiKickConnection then antiKickConnection:Disconnect(); antiKickConnection=nil end end
 
--- ===== ESP TAB =====
+--// ESP UI
 local ESPSection = Tabs.ESP:AddSection("ESP Toggles")
 local comboUI = ESPSection:AddParagraph({ Title = "Combination Code", Content = "—" })
 comboParagraph = comboUI
 
-ESPSection:AddToggle("ComboLabelESP", {
-    Title = "Combination Puzzle Label",
+ESPSection:AddToggle("ComboCodeLabelESP", {
+    Title = "Combination Code Label",
     Default = false,
     Callback = function(state)
         comboLabelEspActive = state
         ensureComboLabel(state)
     end
 })
+
 ESPSection:AddToggle("CakeESP", {
     Title = "Cake ESP",
     Default = false,
@@ -817,6 +859,7 @@ ESPSection:AddToggle("CakeESP", {
         end
     end
 })
+
 ESPSection:AddToggle("CoinESP", {
     Title = "Coin ESP",
     Default = false,
@@ -836,6 +879,7 @@ ESPSection:AddToggle("CoinESP", {
         end
     end
 })
+
 ESPSection:AddToggle("PlayerChams", {
     Title = "Player Chams",
     Default = false,
@@ -884,7 +928,8 @@ ESPSection:AddToggle("PlayerChams", {
         end
     end
 })
-ESPSection:AddToggle("Nametags", {
+
+ESPSection:AddToggle("NametagsESP", {
     Title = "Nametags",
     Default = false,
     Callback = function(state)
@@ -916,6 +961,7 @@ ESPSection:AddToggle("Nametags", {
         end
     end
 })
+
 ESPSection:AddToggle("ValveESP", {
     Title = "Valve ESP",
     Default = false,
@@ -935,6 +981,7 @@ ESPSection:AddToggle("ValveESP", {
         end
     end
 })
+
 ESPSection:AddToggle("CubePuzzleESP", {
     Title = "Cube Puzzle ESP",
     Default = false,
@@ -957,31 +1004,29 @@ ESPSection:AddToggle("CubePuzzleESP", {
 
 -- Colors
 local ESPColorsSection = Tabs.ESP:AddSection("ESP Colors")
-ESPColorsSection:AddColorpicker("Cake ESP", { Title="Cake ESP", Default=cakeEspColor, Callback=function(c) cakeEspColor=c end })
-ESPColorsSection:AddColorpicker("Coin ESP", { Title="Coin ESP", Default=coinEspColor, Callback=function(c) coinEspColor=c end })
-ESPColorsSection:AddColorpicker("Enemy Chams", { Title="Enemy Chams", Default=enemyChamColor, Callback=function(c) enemyChamColor=c end })
-ESPColorsSection:AddColorpicker("Team Chams", { Title="Team Chams", Default=teamChamColor, Callback=function(c) teamChamColor=c end })
-ESPColorsSection:AddColorpicker("Valve ESP", { Title="Valve ESP", Default=valveEspColor, Callback=function(c) valveEspColor=c end })
-ESPColorsSection:AddColorpicker("Cube Puzzle ESP", { Title="Cube Puzzle ESP", Default=puzzleNumberEspColor, Callback=function(c) puzzleNumberEspColor=c end })
-ESPColorsSection:AddColorpicker("Code Puzzle (Label)", { Title="Code Puzzle (Label)", Default=codePuzzleLabelColor, Callback=function(c) codePuzzleLabelColor=c end })
+ESPColorsSection:AddColorpicker("CakeESPColor", { Title="Cake ESP", Default=cakeEspColor, Callback=function(c) cakeEspColor=c end })
+ESPColorsSection:AddColorpicker("CoinESPColor", { Title="Coin ESP", Default=coinEspColor, Callback=function(c) coinEspColor=c end })
+ESPColorsSection:AddColorpicker("EnemyChamsColor", { Title="Enemy Chams", Default=enemyChamColor, Callback=function(c) enemyChamColor=c end })
+ESPColorsSection:AddColorpicker("TeamChamsColor", { Title="Team Chams", Default=teamChamColor, Callback=function(c) teamChamColor=c end })
+ESPColorsSection:AddColorpicker("ValveESPColor", { Title="Valve ESP", Default=valveEspColor, Callback=function(c) valveEspColor=c end })
+ESPColorsSection:AddColorpicker("CubePuzzleESPColor", { Title="Cube Puzzle ESP", Default=puzzleNumberEspColor, Callback=function(c) puzzleNumberEspColor=c end })
+ESPColorsSection:AddColorpicker("CodePuzzleLabelColor", { Title="Code Puzzle (Label)", Default=codePuzzleLabelColor, Callback=function(c) codePuzzleLabelColor=c end })
 
--- ===== PLAYER TAB =====
+--// Player tab
 local PlayerMovementSection = Tabs.Player:AddSection("Movement")
-PlayerMovementSection:AddSlider("Walk Speed", {
+PlayerMovementSection:AddSlider("WalkSpeedSlider", {
     Title="Walk Speed", Default=16, Min=16, Max=45, Rounding=0,
     Callback=function(value)
         currentSpeed = value
-        local c = LP.Character
-        local h = c and c:FindFirstChild("Humanoid")
+        local h = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
         if h then h.WalkSpeed = currentSpeed end
         if value ~= 16 then
             if speedLoop then task.cancel(speedLoop) end
             speedLoop = task.spawn(function()
                 while currentSpeed ~= 16 do
-                    local cc = LP.Character
-                    local hh = cc and cc:FindFirstChild("Humanoid")
+                    local hh = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
                     if hh then hh.WalkSpeed = currentSpeed end
-                    task.wait(0.1)
+                    task.wait(0.15)
                 end
             end)
         else
@@ -991,12 +1036,11 @@ PlayerMovementSection:AddSlider("Walk Speed", {
 })
 PlayerMovementSection:AddButton({ Title="Reset Speed", Callback=function()
     currentSpeed = 16
-    local c = LP.Character
-    local h = c and c:FindFirstChild("Humanoid")
+    local h = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
     if h then h.WalkSpeed = 16 end
     if speedLoop then task.cancel(speedLoop); speedLoop=nil end
 end})
-PlayerMovementSection:AddToggle("Fly (Local)", { Title="Fly (Local)", Default=false, Callback=function(state)
+PlayerMovementSection:AddToggle("FlyToggle", { Title="Fly (Local)", Default=false, Callback=function(state)
     if state then
         local character = LP.Character
         if character and character:FindFirstChild("HumanoidRootPart") then
@@ -1028,8 +1072,8 @@ PlayerMovementSection:AddToggle("Fly (Local)", { Title="Fly (Local)", Default=fa
         if flyConnection then flyConnection:Disconnect(); flyConnection=nil end
     end
 end})
-PlayerMovementSection:AddSlider("Fly Speed", { Title="Fly Speed", Default=50, Min=1, Max=200, Rounding=0, Callback=function(v) flySpeed=v end })
-PlayerMovementSection:AddToggle("Noclip", { Title="Noclip", Default=false, Callback=function(state)
+PlayerMovementSection:AddSlider("FlySpeedSlider", { Title="Fly Speed", Default=50, Min=1, Max=200, Rounding=0, Callback=function(v) flySpeed=v end })
+PlayerMovementSection:AddToggle("NoclipToggle", { Title="Noclip", Default=false, Callback=function(state)
     if state then
         if noclipActive then return end
         noclipActive = true
@@ -1052,16 +1096,14 @@ PlayerMovementSection:AddToggle("Noclip", { Title="Noclip", Default=false, Callb
         noclipParts = {}
     end
 end})
-Tabs.Player:AddSection("Utility"):AddToggle("Anti-AFK", { Title="Anti-AFK", Default=false, Callback=function(state) if state then enableAntiAfk() else disableAntiAfk() end end })
 
--- ===== AUTO TAB (grouped) =====
-local Killer = Tabs.Auto:AddSection("Killer")
-local Runner = Tabs.Auto:AddSection("Runner")
-local Puzzles = Tabs.Auto:AddSection("Puzzles")
-local Misc    = Tabs.Auto:AddSection("Misc")
+local PlayerUtilitySection = Tabs.Player:AddSection("Utility")
+PlayerUtilitySection:AddToggle("AntiAFKToggle", { Title="Anti-AFK", Default=false, Callback=function(state) if state then enableAntiAfk() else disableAntiAfk() end end })
 
-Killer:AddToggle("Auto Kill", {
-    Title = "Auto Kill (Banana)",
+--// Auto tab – organized
+local killer = Tabs.Auto:AddSection("Killer")
+killer:AddToggle("AutoKillToggle", {
+    Title = "Auto Kill",
     Default = false,
     Callback = function(state)
         autoKillActive = state
@@ -1070,23 +1112,24 @@ Killer:AddToggle("Auto Kill", {
             autoKillThread = task.spawn(function()
                 while autoKillActive do
                     pcall(function()
-                        local me = LP
-                        local c = me.Character
-                        local hrp = c and c:FindFirstChild("HumanoidRootPart")
-                        if hrp and me.Team and me.Team.Name == "Banana" then
-                            local target, dist = nil, 1e9
+                        local lp = LP
+                        local ch = lp.Character
+                        local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+                        if hrp and lp.Team and lp.Team.Name == "Banana" then
+                            local targetPlayer, shortest = nil, math.huge
                             for _, p in ipairs(Players:GetPlayers()) do
-                                if p ~= me and p.Team and p.Team.Name == "Runners" then
-                                    local ch = p.Character; local th = ch and ch:FindFirstChild("HumanoidRootPart")
-                                    if th then
-                                        local d = (hrp.Position - th.Position).Magnitude
-                                        if d < dist then dist = d; target = th end
+                                if p ~= lp and p.Team and p.Team.Name == "Runners" then
+                                    local c = p.Character; local h = c and c:FindFirstChild("HumanoidRootPart")
+                                    if h then
+                                        local d = (hrp.Position - h.Position).Magnitude
+                                        if d < shortest then shortest = d; targetPlayer = p end
                                     end
                                 end
                             end
-                            if target then
+                            if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                                local tgt = targetPlayer.Character.HumanoidRootPart.Position
                                 local my = getHRP()
-                                if my then my.CFrame = CFrame.new(target.Position + Vector3.new(0, 2, 0)) end
+                                if my then my.CFrame = CFrame.new(tgt + Vector3.new(0, 2, 0)) end
                             end
                         end
                     end)
@@ -1098,8 +1141,8 @@ Killer:AddToggle("Auto Kill", {
         end
     end
 })
-Killer:AddToggle("Auto Delete Lockers", {
-    Title = "Auto Delete Lockers",
+killer:AddToggle("DeleteLockersToggle", {
+    Title = "Delete Lockers",
     Default = false,
     Callback = function(state)
         autoDeleteLockersActive = state
@@ -1108,10 +1151,8 @@ Killer:AddToggle("Auto Delete Lockers", {
             autoDeleteLockersThread = task.spawn(function()
                 while autoDeleteLockersActive do
                     pcall(function()
-                        for _, desc in ipairs(workspace:GetDescendants()) do
-                            if desc and typeof(desc.Name)=="string" and desc.Name:lower():find("locker") then
-                                desc:Destroy()
-                            end
+                        for _, d in ipairs(workspace:GetDescendants()) do
+                            if d and typeof(d.Name)=="string" and d.Name:lower():find("locker") then pcall(function() d:Destroy() end) end
                         end
                     end)
                     task.wait(5)
@@ -1123,8 +1164,9 @@ Killer:AddToggle("Auto Delete Lockers", {
     end
 })
 
-Runner:AddToggle("Auto Delete Peels", {
-    Title = "Auto Delete Peels",
+local runner = Tabs.Auto:AddSection("Runner")
+runner:AddToggle("DeletePeelsToggle", {
+    Title = "Delete Peels",
     Default = false,
     Callback = function(state)
         autoDeletePeelsActive = state
@@ -1138,7 +1180,7 @@ Runner:AddToggle("Auto Delete Peels", {
                             and workspace.GameKeeper.Map:FindFirstChild("Peels")) or workspace:FindFirstChild("Peels")
                         if peelsFolder then
                             for _, peel in ipairs(peelsFolder:GetChildren()) do
-                                if peel and peel.Name:lower():find("peel") then peel:Destroy() end
+                                if peel and peel.Name:lower():find("peel") then pcall(function() peel:Destroy() end) end
                             end
                         end
                     end)
@@ -1150,20 +1192,7 @@ Runner:AddToggle("Auto Delete Peels", {
         end
     end
 })
-Runner:AddToggle("Auto Escape", {
-    Title = "Auto Escape",
-    Default = false,
-    Callback = function(state)
-        autoEscapeActive = state
-        if state then
-            if autoEscapeThread then task.cancel(autoEscapeThread) end
-            autoEscapeThread = task.spawn(autoEscapeLoop)
-        else
-            if autoEscapeThread then task.cancel(autoEscapeThread); autoEscapeThread=nil end
-        end
-    end
-})
-Runner:AddToggle("Auto Collect Coins", {
+runner:AddToggle("AutoCoinsToggle", {
     Title = "Auto Collect Coins",
     Default = false,
     Callback = function(state)
@@ -1176,83 +1205,89 @@ Runner:AddToggle("Auto Collect Coins", {
         end
     end
 })
-
-Puzzles:AddButton({ Title = "Instant Finish Valve", Callback = function() instantFinishValve(4) end })
-Puzzles:AddToggle("Auto Cake", {
-    Title = "Auto Cake (loop)",
+runner:AddToggle("AutoEscapeToggle", {
+    Title = "Auto Escape",
     Default = false,
     Callback = function(state)
-        autoCakeActive = state
+        autoEscapeActive = state
         if state then
-            if autoCakeThread then task.cancel(autoCakeThread) end
-            autoCakeThread = task.spawn(function()
-                while autoCakeActive do
-                    autoCakeOnce()
-                    task.wait(0.3)
-                end
-            end)
+            if autoEscapeThread then task.cancel(autoEscapeThread) end
+            autoEscapeThread = task.spawn(autoEscapeLoop)
         else
-            if autoCakeThread then task.cancel(autoCakeThread); autoCakeThread=nil end
+            if autoEscapeThread then task.cancel(autoEscapeThread); autoEscapeThread=nil end
         end
     end
 })
-Puzzles:AddButton({ Title = "Solve Picture Puzzle (Once)", Callback = solvePicturePuzzleOnce })
-Puzzles:AddButton({ Title = "Enter Combination Code (Once)", Callback = enterCombinationCodeOnce })
 
-Misc:AddToggle("Anti Kick Bypass", { Title = "Anti Kick Bypass", Default = false, Callback = function(s) if s then startAntiKick() else stopAntiKick() end end })
+local puzzles = Tabs.Auto:AddSection("Puzzles")
+puzzles:AddButton({ Title="Auto Cake (run once)", Callback=autoCakeOnce })
+puzzles:AddButton({ Title="Enter Combination Code (once)", Callback=enterCombinationOnce })
+puzzles:AddButton({ Title="Solve Picture Puzzle (once)", Callback=solvePicturePuzzleOnce })
+puzzles:AddButton({ Title="Instant Finish Valve", Callback=function() instantFinishValve(4) end })
 
--- Auto Chat Combination Code (30s cooldown)
-local function scheduleDelayedSend(code)
-    scheduleToken = scheduleToken + 1
-    local myToken = scheduleToken
-    task.delay(chatDelaySeconds, function()
-        if autoChatComboActive and myToken==scheduleToken and comboCurrentCode==code and lastSentCombo ~= code then
-            sendChatMessage("code: " .. tostring(code))
-            lastSentCombo = code
-        end
-    end)
-end
-local function startAutoChatCombo()
-    if autoChatWatcher then task.cancel(autoChatWatcher) end
-    lastObservedCombo = nil
-    autoChatWatcher = task.spawn(function()
-        while autoChatComboActive do
-            local code = comboCurrentCode
-            if code and code ~= "" and code ~= lastObservedCombo then
-                lastObservedCombo = code
-                scheduleDelayedSend(code)
-            end
-            task.wait(0.3)
-        end
-    end)
-    if comboCurrentCode and comboCurrentCode ~= "" and comboCurrentCode ~= lastSentCombo then
-        lastObservedCombo = comboCurrentCode
-        scheduleDelayedSend(comboCurrentCode)
-    end
-end
-Misc:AddToggle("Auto Chat Combination Code", {
-    Title = "Auto Chat Combination Code",
+-- Auto Chat Combination (cooldown)
+puzzles:AddToggle("AutoChatComboToggle", {
+    Title = "Auto Chat Combination (30s cooldown)",
     Default = false,
     Callback = function(state)
         autoChatComboActive = state
-        if state then startAutoChatCombo()
-        else if autoChatWatcher then task.cancel(autoChatWatcher); autoChatWatcher=nil end; scheduleToken = scheduleToken + 1 end
+        if state then
+            if autoChatWatcher then task.cancel(autoChatWatcher) end
+            lastObservedCombo = nil
+            autoChatWatcher = task.spawn(function()
+                while autoChatComboActive do
+                    local code = comboCurrentCode
+                    if code and code ~= "" and code ~= lastObservedCombo then
+                        lastObservedCombo = code
+                        scheduleToken = scheduleToken + 1
+                        local myToken = scheduleToken
+                        task.delay(chatDelaySeconds, function()
+                            if autoChatComboActive and myToken==scheduleToken and comboCurrentCode==code and lastSentCombo ~= code then
+                                sendChatMessage("code: " .. tostring(code))
+                                lastSentCombo = code
+                            end
+                        end)
+                    end
+                    task.wait(0.3)
+                end
+            end)
+            if comboCurrentCode and comboCurrentCode ~= "" and comboCurrentCode ~= lastSentCombo then
+                lastObservedCombo = comboCurrentCode
+                scheduleToken = scheduleToken + 1
+                local myToken = scheduleToken
+                task.delay(chatDelaySeconds, function()
+                    if autoChatComboActive and myToken==scheduleToken and comboCurrentCode==lastObservedCombo and lastSentCombo ~= lastObservedCombo then
+                        sendChatMessage("code: " .. tostring(lastObservedCombo))
+                        lastSentCombo = lastObservedCombo
+                    end
+                end)
+            end
+        else
+            if autoChatWatcher then task.cancel(autoChatWatcher); autoChatWatcher=nil end
+            scheduleToken = scheduleToken + 1
+        end
     end
 })
 
--- ===== VISUAL TAB =====
-local VisualSection = Tabs.Visual
-VisualSection:AddToggle("Fullbright", { Title="Fullbright", Default=false, Callback=function(state)
+puzzles:AddToggle("AntiKickToggle", {
+    Title = "Anti Kick Bypass",
+    Default = false,
+    Callback = function(state) if state then startAntiKick() else stopAntiKick() end end
+})
+
+--// Visual tab
+local VisualSection = Tabs.Visual:AddSection("Lighting")
+VisualSection:AddToggle("FullbrightToggle", { Title="Fullbright", Default=false, Callback=function(state)
     fullbrightActive = state
     if state then
         Lighting.Brightness = 2
         Lighting.ClockTime = 14
-        Lighting.FogEnd = 100000
+        Lighting.FogEnd = 1000000
         Lighting.GlobalShadows = false
         Lighting.OutdoorAmbient = Color3.fromRGB(128,128,128)
     else restoreLighting() end
 end})
-VisualSection:AddToggle("No Fog", { Title="No Fog", Default=false, Callback=function(state)
+VisualSection:AddToggle("NoFogToggle", { Title="No Fog", Default=false, Callback=function(state)
     noFogActive = state
     if state then
         if noFogLoop then task.cancel(noFogLoop) end
@@ -1263,7 +1298,7 @@ VisualSection:AddToggle("No Fog", { Title="No Fog", Default=false, Callback=func
         Lighting.FogEnd = initialLighting.FogEnd
     end
 end})
-VisualSection:AddToggle("Color Correction", { Title="Color Correction", Default=false, Callback=function(state)
+VisualSection:AddToggle("CCToggle", { Title="Color Correction", Default=false, Callback=function(state)
     ccActive = state
     if state then
         if not Lighting:FindFirstChild("ColorCorrectionEffect") then
@@ -1272,10 +1307,10 @@ VisualSection:AddToggle("Color Correction", { Title="Color Correction", Default=
         ccEffect.Brightness = ccBrightness; ccEffect.Contrast=ccContrast; ccEffect.Saturation=ccSaturation
     else if ccEffect then ccEffect:Destroy(); ccEffect=nil end end
 end})
-VisualSection:AddSlider("Brightness", { Title="Brightness", Default=0, Min=-1, Max=1, Rounding=2, Callback=function(v) ccBrightness=v; if ccActive and ccEffect then ccEffect.Brightness=v end end })
-VisualSection:AddSlider("Contrast", { Title="Contrast", Default=0, Min=-2, Max=2, Rounding=2, Callback=function(v) ccContrast=v; if ccActive and ccEffect then ccEffect.Contrast=v end end })
-VisualSection:AddSlider("Saturation", { Title="Saturation", Default=1, Min=0, Max=3, Rounding=2, Callback=function(v) ccSaturation=v; if ccActive and ccEffect then ccEffect.Saturation=v end end })
-VisualSection:AddToggle("Sun Rays", { Title="Sun Rays", Default=false, Callback=function(state)
+VisualSection:AddSlider("CCBrightness", { Title="Brightness", Default=0, Min=-1, Max=1, Rounding=2, Callback=function(v) ccBrightness=v; if ccActive and ccEffect then ccEffect.Brightness=v end end })
+VisualSection:AddSlider("CCContrast", { Title="Contrast", Default=0, Min=-2, Max=2, Rounding=2, Callback=function(v) ccContrast=v; if ccActive and ccEffect then ccEffect.Contrast=v end end })
+VisualSection:AddSlider("CCSaturation", { Title="Saturation", Default=1, Min=0, Max=3, Rounding=2, Callback=function(v) ccSaturation=v; if ccActive and ccEffect then ccEffect.Saturation=v end end })
+VisualSection:AddToggle("SunRaysToggle", { Title="Sun Rays", Default=false, Callback=function(state)
     sunRaysActive=state
     if state then
         if not Lighting:FindFirstChild("SunRaysEffect") then sunRaysEffect = Instance.new("SunRaysEffect"); sunRaysEffect.Parent = Lighting
@@ -1283,12 +1318,12 @@ VisualSection:AddToggle("Sun Rays", { Title="Sun Rays", Default=false, Callback=
         sunRaysEffect.Intensity = sunRaysIntensity
     else if sunRaysEffect then sunRaysEffect:Destroy(); sunRaysEffect=nil end end
 end})
-VisualSection:AddSlider("Sun Rays Intensity", { Title="Sun Rays Intensity", Default=0.3, Min=0, Max=1, Rounding=2, Callback=function(v) sunRaysIntensity=v; if sunRaysActive and sunRaysEffect then sunRaysEffect.Intensity=v end end })
+VisualSection:AddSlider("SunRaysIntensity", { Title="Sun Rays Intensity", Default=0.3, Min=0, Max=1, Rounding=2, Callback=function(v) sunRaysIntensity=v; if sunRaysActive and sunRaysEffect then sunRaysEffect.Intensity=v end end })
 
 local LightingSection = Tabs.Visual:AddSection("Lighting Controls")
-LightingSection:AddSlider("Time of Day", { Title="Time of Day", Default=initialLighting.ClockTime, Min=0, Max=24, Rounding=1, Callback=function(v) Lighting.ClockTime=v end })
-LightingSection:AddSlider("Exposure", { Title="Exposure", Default=initialLighting.ExposureCompensation, Min=-3, Max=3, Rounding=2, Callback=function(v) Lighting.ExposureCompensation=v end })
-LightingSection:AddToggle("Shadows", { Title="Shadows", Default=initialLighting.GlobalShadows, Callback=function(state) Lighting.GlobalShadows=state end })
+LightingSection:AddSlider("TimeOfDaySlider", { Title="Time of Day", Default=initialLighting.ClockTime, Min=0, Max=24, Rounding=1, Callback=function(v) Lighting.ClockTime=v end })
+LightingSection:AddSlider("ExposureSlider", { Title="Exposure", Default=initialLighting.ExposureCompensation, Min=-3, Max=3, Rounding=2, Callback=function(v) Lighting.ExposureCompensation=v end })
+LightingSection:AddToggle("ShadowsToggle", { Title="Shadows", Default=initialLighting.GlobalShadows, Callback=function(state) Lighting.GlobalShadows=state end })
 
 local UtilitySection = Tabs.Visual:AddSection("Utility")
 UtilitySection:AddButton({ Title="Reset All Visual", Callback=function()
@@ -1297,10 +1332,10 @@ UtilitySection:AddButton({ Title="Reset All Visual", Callback=function()
     if noFogLoop then task.cancel(noFogLoop); noFogLoop=nil; noFogActive=false end
     ccActive=false; sunRaysActive=false; fullbrightActive=false
     restoreLighting()
-    Fluent:Notify({ Title="Visual Reset", Content="Lighting restored to original", Duration=3 })
+    Fluent:Notify({ Title="Visual Reset", Content="Lighting restored.", Duration=3 })
 end})
 
--- ===== settings & boot =====
+--// Settings / Save
 SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
 SaveManager:IgnoreThemeSettings()
@@ -1311,7 +1346,7 @@ InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
--- chat toggles
+--// Chat commands for GUI toggle
 local function setupChatCommands()
     local function onChatted(message)
         local msg = message:lower()
@@ -1319,9 +1354,9 @@ local function setupChatCommands()
             isGuiVisible = not isGuiVisible
             if Window and Window.Root then Window.Root.Visible = isGuiVisible end
             if mobileToggleBtn then mobileToggleBtn.Text = "GUI: " .. (isGuiVisible and "ON" or "OFF") end
-            Fluent:Notify({ Title="GUI", Content="Menu "..(isGuiVisible and "opened" or "closed"), Duration=2 })
+            Fluent:Notify({ Title="GUI Toggle", Content="Menu "..(isGuiVisible and "opened" or "closed"), Duration=2 })
         elseif msg=="/help" then
-            Fluent:Notify({ Title="Chat", Content="/gui, /menu, /toggle\n/help", Duration=5 })
+            Fluent:Notify({ Title="Chat Commands", Content="/gui, /menu, /toggle\n/help", Duration=5 })
         end
     end
     if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
@@ -1334,6 +1369,7 @@ local function setupChatCommands()
 end
 setupChatCommands()
 
+--// Character reapply
 LP.CharacterAdded:Connect(function(character)
     character:WaitForChild("HumanoidRootPart")
     task.wait(0.5)
@@ -1345,10 +1381,7 @@ LP.CharacterAdded:Connect(function(character)
     if noclipActive then task.wait(0.5); end
 end)
 
-Players.PlayerAdded:Connect(function(_) end)
-
+--// Boot
 Fluent:Notify({ Title="Banana Eats Script", Content="Loaded", Duration=4 })
 Window:SelectTab(1)
-
--- start readers
 startComboWatcher()
