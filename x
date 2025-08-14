@@ -1,4 +1,4 @@
--- Banana Eats Script - by Massivendurchfall (full build: Auto Cake + Auto Escape + fixes)
+-- Banana Eats Script - by Massivendurchfall (Auto Cake + Auto Escape + Mobile Toggle)
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
@@ -50,10 +50,48 @@ local Window = Fluent:CreateWindow({
 local Tabs = {
     ESP = Window:AddTab({ Title = "ESP", Icon = "eye" }),
     Player = Window:AddTab({ Title = "Player", Icon = "user" }),
-    Auto = Window:AddTab({ Title = "Auto", Icon = "log-out" }), -- door-like icon
+    Auto = Window:AddTab({ Title = "Auto", Icon = "log-out" }),
     Visual = Window:AddTab({ Title = "Visual", Icon = "sun" }),
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
 }
+
+-- ===== Mobile Toggle Button (für Touch) =====
+local mobileToggleBtn
+do
+    if isMobile then
+        local guiParent = (gethui and gethui()) or game:GetService("CoreGui")
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "BE_MobileToggle"
+        sg.ResetOnSpawn = false
+        sg.IgnoreGuiInset = true
+        sg.Parent = guiParent
+
+        local btn = Instance.new("TextButton")
+        btn.Name = "Toggle"
+        btn.AnchorPoint = Vector2.new(1,0)
+        btn.Position = UDim2.new(1, -12, 0, 12)
+        btn.Size = UDim2.new(0, 120, 0, 40)
+        btn.Text = "GUI: ON"
+        btn.BackgroundTransparency = 0.2
+        btn.BackgroundColor3 = Color3.fromRGB(20,20,20)
+        btn.TextColor3 = Color3.fromRGB(255,255,255)
+        btn.Font = Enum.Font.GothamBold
+        btn.TextSize = 16
+        btn.AutoButtonColor = true
+        btn.Parent = sg
+
+        local corner = Instance.new("UICorner", btn); corner.CornerRadius = UDim.new(0,10)
+        local stroke = Instance.new("UIStroke", btn); stroke.Thickness = 1; stroke.Color = Color3.fromRGB(80,80,80)
+
+        btn.MouseButton1Click:Connect(function()
+            isGuiVisible = not isGuiVisible
+            if Window and Window.Root then Window.Root.Visible = isGuiVisible end
+            btn.Text = "GUI: " .. (isGuiVisible and "ON" or "OFF")
+        end)
+
+        mobileToggleBtn = btn
+    end
+end
 
 -- ===== small helpers =====
 local function createBillboard(text)
@@ -88,6 +126,13 @@ local function makeBoxAdornment(part, name, color, sizeInflate)
     return esp
 end
 
+local function safePrimary(model)
+    if model and model:IsA("Model") then
+        return model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+    end
+    return nil
+end
+
 local function getHRP()
     local c = LP.Character or LP.CharacterAdded:Wait()
     local hrp = c:FindFirstChild("HumanoidRootPart")
@@ -105,7 +150,7 @@ local function forceTP(cf)
         hum.Sit = false
         hum.PlatformStand = false
     end
-    for i=1,5 do
+    for _=1,5 do
         pcall(function() hrp.CFrame = cf end)
         task.wait(0.05)
         if (hrp.CFrame.Position - cf.Position).Magnitude < 1.5 then return end
@@ -491,9 +536,9 @@ end
 local function fireTouch(part)
     local hrp = getHRP(); if not hrp or not part or not part.Parent then return end
     pcall(function()
-        firetouchinterest(hrp, part, 0) -- begin
+        firetouchinterest(hrp, part, 0)
         task.wait(0.05)
-        firetouchinterest(hrp, part, 1) -- end
+        firetouchinterest(hrp, part, 1)
     end)
 end
 
@@ -549,138 +594,105 @@ local function autoEscapeLoop()
                 end
             end
         end)
-        task.wait(0.2) -- nicht zu aggressiv spammen
+        task.wait(0.2)
     end
 end
 
--- ===== Auto Cake =====
-local function findMainCakeInteract()
-    local gk = workspace:FindFirstChild("GameKeeper"); if not gk then return nil end
-    local puzzles = gk:FindFirstChild("Puzzles"); if not puzzles then return nil end
+-- ===== Auto Cake (Main-Plate stehen, Items/CakePlate klicken) =====
 
-    local bestPart, bestScore = nil, -1
-    local function scorePart(p)
-        local score = 0
-        local name = p.Name:lower()
-        if name:find("main") then score += 3 end
-        if name:find("plate") or name:find("table") then score += 2 end
-        if name:find("cake") then score += 1 end
-        for _,d in ipairs(p:GetDescendants()) do
-            if d:IsA("ClickDetector") or d:IsA("ProximityPrompt") then score += 1 end
-        end
-        return score
+local function waitForPath(root, segments, timeout)
+    local t0 = tick()
+    local node = root
+    for _, name in ipairs(segments) do
+        local left = timeout and math.max(0, timeout - (tick()-t0)) or 5
+        node = node:FindFirstChild(name) or node:WaitForChild(name, left)
+        if not node then return nil end
     end
+    return node
+end
 
-    for _, obj in ipairs(puzzles:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            local hasInteract = obj:FindFirstChildWhichIsA("ClickDetector", true)
-                              or obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-            if hasInteract then
-                local s = scorePart(obj)
-                if s > bestScore then bestScore = s; bestPart = obj end
+local function getMainPlateRoot()
+    local root = waitForPath(workspace, {"GameKeeper","Puzzles","CakePuzzle","Root"}, 5)
+    if root and root:IsA("BasePart") then return root end
+    local plate = waitForPath(workspace, {"GameKeeper","Puzzles","CakePuzzle","Plate"}, 5)
+    if plate and plate:IsA("BasePart") then return plate end
+    -- alter Pfad (manche Maps)
+    local puzzles = waitForPath(workspace, {"GameKeeper","Puzzles"}, 3)
+    if puzzles then
+        local fallback = puzzles:FindFirstChild("Root")
+        if fallback and fallback:IsA("BasePart") then return fallback end
+    end
+    return nil
+end
+
+local function getActiveCakePlates()
+    local items = waitForPath(workspace, {"GameKeeper","Map","Items"}, 5)
+    local list = {}
+    if not items then return list end
+    for _, cp in ipairs(items:GetChildren()) do
+        if cp.Name == "CakePlate" then
+            local root = cp:FindFirstChild("Model")
+            root = root and root:FindFirstChild("CakePlate")
+            root = root and root:FindFirstChild("Root")
+            local cd = root and (root:FindFirstChildOfClass("ClickDetector") or root:FindFirstChildWhichIsA("ClickDetector", true))
+            if cd then
+                table.insert(list, {inst = cp, cd = cd})
             end
         end
     end
-    return bestPart
+    return list
 end
 
-local function eachCakeInteractable(callback)
-    local gk = workspace:FindFirstChild("GameKeeper"); if not gk then return end
-    local map = gk:FindFirstChild("Map"); if not map then return end
-    local items = map:FindFirstChild("Items"); if not items then return end
-    local plates = items:FindFirstChild("CakePlate") or items:FindFirstChild("CakePlates") or items
-    for _, plate in ipairs(plates:GetChildren()) do
-        local cake = plate:FindFirstChild("Cake") or plate:FindFirstChildWhichIsA("Model")
-        if cake then
-            local tried = false
-            for _, n in ipairs({"Interact","Root","Touch"}) do
-                local node = cake:FindFirstChild(n, true)
-                if node and node:IsA("BasePart") then
-                    local has = node:FindFirstChildWhichIsA("ClickDetector", true) 
-                             or node:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    if has then
-                        tried = true
-                        local r = callback(node)
-                        if r == "break" then return end
-                        break
-                    end
-                end
-            end
-            if not tried then
-                for _, d in ipairs(cake:GetDescendants()) do
-                    if d:IsA("BasePart") then
-                        local has = d:FindFirstChildWhichIsA("ClickDetector", true)
-                                  or d:FindFirstChildWhichIsA("ProximityPrompt", true)
-                        if has then
-                            local r = callback(d)
-                            if r == "break" then return end
-                            break
-                        end
-                    end
-                end
-            end
-        end
+local function clickUntilGone(entry, timeout)
+    timeout = timeout or 3
+    local t0 = tick()
+    while entry.inst and entry.inst.Parent and tick() - t0 < timeout do
+        if not entry.cd or not entry.cd.Parent then break end
+        pcall(function()
+            if entry.cd.MaxActivationDistance then entry.cd.MaxActivationDistance = math.huge end
+            fireclickdetector(entry.cd)
+        end)
+        task.wait(0.05)
     end
 end
 
-local function fireClickOrPrompt(root)
-    if not root or not root.Parent then return end
-    for _, d in ipairs(root:GetDescendants()) do
-        if d:IsA("ClickDetector") then
-            pcall(function() if d.MaxActivationDistance then d.MaxActivationDistance = math.huge end; fireclickdetector(d) end)
-        elseif d:IsA("ProximityPrompt") then
-            pcall(function() fireproximityprompt(d, 1) end)
-        end
-    end
-    local cd = root:FindFirstChildWhichIsA("ClickDetector")
-    if cd then pcall(function() if cd.MaxActivationDistance then cd.MaxActivationDistance = math.huge end; fireclickdetector(cd) end) end
-    local pp = root:FindFirstChildWhichIsA("ProximityPrompt")
-    if pp then pcall(function() fireproximityprompt(pp, 1) end) end
-end
-
-local AC_PICK_DELAY = 0.5
-local EMPTY_SCANS_BEFORE_RETURN = 6
-
-local function autoCakeLoop()
+local function autoCakeOnce()
     local hrp = getHRP(); if not hrp then return end
-    local originalCF = hrp.CFrame
+    local startCF = hrp.CFrame
 
-    local mainInteract = findMainCakeInteract()
-    if not mainInteract then
-        Fluent:Notify({ Title = "Auto Cake", Content = "Main Plate nicht gefunden.", Duration = 4 })
+    local mainRoot = getMainPlateRoot()
+    if not mainRoot then
+        Fluent:Notify({ Title = "Auto Cake", Content = "Main-Plate nicht gefunden (CakePuzzle.Root/Plate).", Duration = 4 })
         return
     end
 
-    -- 1) Zur Main Plate und dort bleiben
-    forceTP(CFrame.new(mainInteract.Position + Vector3.new(0, 3, 0)))
+    -- 1) Einmal zur Main-Plate teleportieren und dort bleiben
+    forceTP(CFrame.new(mainRoot.Position + Vector3.new(0, 3, 0)))
     task.wait(0.2)
 
-    local emptyScans = 0
+    -- 2) Solange es CakePlates in Items gibt, deren ClickDetector spammen
     while autoCakeActive do
-        local picked = false
-        pcall(function()
-            eachCakeInteractable(function(ip)
-                if not autoCakeActive then return "break" end
-                fireClickOrPrompt(ip)                 -- Stück aufnehmen
-                task.wait(AC_PICK_DELAY)
-                fireClickOrPrompt(mainInteract)       -- am Main ablegen
-                picked = true
-            end)
+        local plates = getActiveCakePlates()
+        if #plates == 0 then break end
+
+        -- optional sortieren (nahe an Main-Plate zuerst)
+        table.sort(plates, function(a,b)
+            local aP = (a.cd.Parent and a.cd.Parent:IsA("BasePart")) and a.cd.Parent.Position or mainRoot.Position
+            local bP = (b.cd.Parent and b.cd.Parent:IsA("BasePart")) and b.cd.Parent.Position or mainRoot.Position
+            return (aP - mainRoot.Position).Magnitude < (bP - mainRoot.Position).Magnitude
         end)
-        if picked then
-            emptyScans = 0
-        else
-            emptyScans = emptyScans + 1
-            if emptyScans >= EMPTY_SCANS_BEFORE_RETURN then
-                break
-            end
+
+        for _, entry in ipairs(plates) do
+            if not autoCakeActive then break end
+            clickUntilGone(entry, 2.5)
+            task.wait(0.1)
         end
         task.wait(0.2)
     end
 
-    -- 2) erst jetzt zurück
+    -- 3) Zurück zum Start
     local now = getHRP()
-    if now then forceTP(originalCF) end
+    if now then forceTP(startCF) end
 end
 
 -- ===== anti AFK / anti kick =====
@@ -994,8 +1006,7 @@ AutoSection:AddToggle("Auto Cake", {
             if autoCakeThread then task.cancel(autoCakeThread) end
             autoCakeThread = task.spawn(function()
                 while autoCakeActive do
-                    autoCakeLoop()
-                    -- nach einem kompletten Durchlauf kleine Pause
+                    autoCakeOnce()
                     task.wait(0.3)
                 end
             end)
@@ -1254,6 +1265,7 @@ local function setupChatCommands()
         if msg=="/gui" or msg=="/menu" or msg=="/toggle" then
             isGuiVisible = not isGuiVisible
             if Window and Window.Root then Window.Root.Visible = isGuiVisible end
+            if mobileToggleBtn then mobileToggleBtn.Text = "GUI: " .. (isGuiVisible and "ON" or "OFF") end
             Fluent:Notify({ Title="GUI Toggle", Content="Menu "..(isGuiVisible and "opened" or "closed"), Duration=2 })
         elseif msg=="/help" then
             Fluent:Notify({ Title="Chat Commands", Content="/gui, /menu, /toggle\n/help", Duration=5 })
@@ -1280,7 +1292,7 @@ LP.CharacterAdded:Connect(function(character)
     if noclipActive then task.wait(0.5); end
 end)
 
-Players.PlayerAdded:Connect(function(p) end)
+Players.PlayerAdded:Connect(function(_) end)
 
 Fluent:Notify({ Title="Banana Eats Script", Content="Loaded", Duration=4 })
 Window:SelectTab(1)
