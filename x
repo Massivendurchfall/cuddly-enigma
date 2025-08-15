@@ -1549,7 +1549,7 @@ local farmCoinsNote = farmSection:AddParagraph({
     Content = "Warning: On mobile devices, 'Auto Collect Coins' may cause a crash."
 })
 farmSection:AddToggle("FarmCoinsToggle", {
-    Title = "Auto Collect Coins (manual, may crash on mobile)",
+    Title = "Enable Auto Collect Coins",
     Default = false,
     Callback = function(state)
         setAutoCoins(state)
