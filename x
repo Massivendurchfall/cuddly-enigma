@@ -155,14 +155,13 @@ local coinEspActive, coinLoop, coinConnAdd, coinConnRem = false, nil, nil, nil
 local coinEspColor = Color3.fromRGB(0,255,0)
 local coinTargets = {}
 
--- >>>>> NEW: Coins Auto-Collect tracker (event/queue-based, mobile-safe)
-local coinAutoParts = {}                        -- set of coin BaseParts to collect
+-- Event-/Queue-basiertes Auto-Collect (gedrosselt)
+local coinAutoParts = {}
 local coinAutoConnAdd, coinAutoConnRem = nil, nil
-local lastCoinTouch = setmetatable({}, {__mode="k"})  -- weak keys to avoid leaks
+local lastCoinTouch = setmetatable({}, {__mode="k"})
 local COIN_TOUCHES_PER_STEP = isMobile and 5 or 15
 local COIN_STEP_DELAY = isMobile and 0.30 or 0.12
 local COIN_DEBOUNCE = isMobile and 0.85 or 0.45
--- <<<<< NEW (above)
 
 local chamsActive, chamsLoop = false, nil
 local enemyChamColor = Color3.fromRGB(255,0,0)
@@ -525,12 +524,10 @@ local function fireTouch(part)
     end)
 end
 
--- >>>>> NEW: Event-driven, throttled Auto-Collect Coins
+-- Auto-Collect Coins (ereignisgetrieben, gedrosselt)
 local function startCoinTracker()
     if coinAutoConnAdd or coinAutoConnRem then return end
-    -- seed existing coins once
     initialScanAndCache(isCoinPart, coinAutoParts)
-    -- hook future additions/removals
     coinAutoConnAdd, coinAutoConnRem = hookWorkspace(isCoinPart, coinAutoParts, coinAutoConnAdd, coinAutoConnRem)
 end
 
@@ -542,7 +539,6 @@ local function stopCoinTracker()
 end
 
 local function autoCollectCoinsFunc()
-    -- Throttled loop: touches a small batch per step, debounced per coin
     while autoCollectCoinsActive do
         local count = 0
         for token,_ in pairs(coinAutoParts) do
@@ -565,7 +561,6 @@ local function autoCollectCoinsFunc()
         task.wait(COIN_STEP_DELAY)
     end
 end
--- <<<<< NEW (above)
 
 local function findEscapeTouchParts()
     local out = {}
@@ -978,7 +973,6 @@ end
 local function setAutoCoins(state)
     if state and not autoCollectCoinsActive then
         autoCollectCoinsActive = true
-        -- start tracker and throttled loop
         startCoinTracker()
         if autoCollectCoinsThread then task.cancel(autoCollectCoinsThread) end
         autoCollectCoinsThread = task.spawn(autoCollectCoinsFunc)
@@ -1060,6 +1054,7 @@ local function turnOffAllAutos()
     setNoclip(false)
 end
 
+-- ==== UI ====
 local ESPSection = Tabs.ESP:AddSection("ESP Toggles")
 local comboUI = ESPSection:AddParagraph({ Title = "Combination Code", Content = "—" })
 comboParagraph = comboUI
@@ -1543,9 +1538,29 @@ LP.CharacterAdded:Connect(function(character)
     if noclipActive then task.wait(0.5); end
 end)
 
+-- ==== FARM ====
 local farmSection = Tabs.Farm:AddSection("Farm Mode")
 local farmTeamParagraph = farmSection:AddParagraph({ Title = "Team", Content = "—" })
 local farmStatusParagraph = farmSection:AddParagraph({ Title = "Status", Content = "Idle" })
+
+-- >>> Hinweis & separater Toggle direkt unter Farm
+local farmCoinsNote = farmSection:AddParagraph({
+    Title = "Hinweis Auto Coins",
+    Content = "Achtung: Auf Mobile kann 'Auto Collect Coins' zum Crash führen."
+})
+farmSection:AddToggle("FarmCoinsToggle", {
+    Title = "Auto Collect Coins (manuell, Mobile kann crashen)",
+    Default = false,
+    Callback = function(state)
+        setAutoCoins(state)
+        if state then
+            farmStatusParagraph:SetDesc("Auto Coins: ON")
+        else
+            farmStatusParagraph:SetDesc("Auto Coins: OFF")
+        end
+    end
+})
+-- <<<
 
 local farmActive = false
 local farmToken = 0
@@ -1579,8 +1594,8 @@ local function applyFarmForTeam()
             setNoclip(true)
             setFly(true)
             setAutoBarrel(true)
-            setAutoCoins(true) -- nutzt jetzt das gedrosselte, event-basierte System
-            updateFarmUI(team, "Fly+Noclip+Collecting")
+            -- WICHTIG: AutoCoins NICHT mehr automatisch im Farm-Mode aktivieren.
+            updateFarmUI(team, "Fly+Noclip (+Barrel). Coins manuell toggeln.")
         end)
         task.delay(25, function()
             if farmToken ~= token or currentTeamName() ~= team or not farmActive then return end
