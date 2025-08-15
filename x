@@ -1546,10 +1546,10 @@ local farmStatusParagraph = farmSection:AddParagraph({ Title = "Status", Content
 -- >>> Hinweis & separater Toggle direkt unter Farm
 local farmCoinsNote = farmSection:AddParagraph({
     Title = "Hinweis Auto Coins",
-    Content = "Achtung: Auf Mobile kann 'Auto Collect Coins' zum Crash führen."
+    Content = "Warning: On mobile devices, 'Auto Collect Coins' may cause a crash."
 })
 farmSection:AddToggle("FarmCoinsToggle", {
-    Title = "Auto Collect Coins (manuell, Mobile kann crashen)",
+    Title = "Auto Collect Coins (manual, may crash on mobile)",
     Default = false,
     Callback = function(state)
         setAutoCoins(state)
