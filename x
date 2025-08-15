@@ -155,13 +155,13 @@ local coinEspActive, coinLoop, coinConnAdd, coinConnRem = false, nil, nil, nil
 local coinEspColor = Color3.fromRGB(0,255,0)
 local coinTargets = {}
 
--- Event-/Queue-basiertes Auto-Collect (gedrosselt)
 local coinAutoParts = {}
 local coinAutoConnAdd, coinAutoConnRem = nil, nil
 local lastCoinTouch = setmetatable({}, {__mode="k"})
-local COIN_TOUCHES_PER_STEP = isMobile and 5 or 15
-local COIN_STEP_DELAY = isMobile and 0.30 or 0.12
-local COIN_DEBOUNCE = isMobile and 0.85 or 0.45
+local COIN_TOUCHES_PER_STEP = isMobile and 2 or 12
+local COIN_STEP_DELAY = isMobile and 0.35 or 0.10
+local COIN_DEBOUNCE = isMobile and 1.00 or 0.45
+local COIN_MAX_RADIUS = isMobile and 85 or 180
 
 local chamsActive, chamsLoop = false, nil
 local enemyChamColor = Color3.fromRGB(255,0,0)
@@ -524,7 +524,6 @@ local function fireTouch(part)
     end)
 end
 
--- Auto-Collect Coins (ereignisgetrieben, gedrosselt)
 local function startCoinTracker()
     if coinAutoConnAdd or coinAutoConnRem then return end
     initialScanAndCache(isCoinPart, coinAutoParts)
@@ -540,25 +539,41 @@ end
 
 local function autoCollectCoinsFunc()
     while autoCollectCoinsActive do
-        local count = 0
-        for token,_ in pairs(coinAutoParts) do
-            if not autoCollectCoinsActive then break end
-            if token and token.Parent then
-                local lt = lastCoinTouch[token] or 0
-                if (tick() - lt) >= COIN_DEBOUNCE then
-                    fireTouch(token)
-                    lastCoinTouch[token] = tick()
-                    count += 1
-                    if count >= COIN_TOUCHES_PER_STEP then
-                        break
+        local hrp = nil
+        local ok = pcall(function() hrp = getHRP() end)
+        if not ok or not hrp then
+            task.wait(COIN_STEP_DELAY)
+        else
+            local snapshot = {}
+            for token,_ in pairs(coinAutoParts) do
+                if token and token.Parent and token:IsA("BasePart") then
+                    local d = (token.Position - hrp.Position).Magnitude
+                    if d <= COIN_MAX_RADIUS then
+                        snapshot[#snapshot+1] = {part = token, dist = d}
+                    end
+                else
+                    coinAutoParts[token] = nil
+                    lastCoinTouch[token] = nil
+                end
+            end
+            table.sort(snapshot, function(a,b) return a.dist < b.dist end)
+            local count = 0
+            for i = 1, #snapshot do
+                if not autoCollectCoinsActive then break end
+                local token = snapshot[i].part
+                if token and token.Parent then
+                    local lt = lastCoinTouch[token] or 0
+                    if (tick() - lt) >= COIN_DEBOUNCE then
+                        fireTouch(token)
+                        lastCoinTouch[token] = tick()
+                        count += 1
+                        if count >= COIN_TOUCHES_PER_STEP then break end
+                        task.wait(isMobile and 0.05 or 0.02)
                     end
                 end
-            else
-                coinAutoParts[token] = nil
-                lastCoinTouch[token] = nil
             end
+            task.wait(COIN_STEP_DELAY)
         end
-        task.wait(COIN_STEP_DELAY)
     end
 end
 
@@ -1054,7 +1069,6 @@ local function turnOffAllAutos()
     setNoclip(false)
 end
 
--- ==== UI ====
 local ESPSection = Tabs.ESP:AddSection("ESP Toggles")
 local comboUI = ESPSection:AddParagraph({ Title = "Combination Code", Content = "—" })
 comboParagraph = comboUI
@@ -1538,16 +1552,10 @@ LP.CharacterAdded:Connect(function(character)
     if noclipActive then task.wait(0.5); end
 end)
 
--- ==== FARM ====
 local farmSection = Tabs.Farm:AddSection("Farm Mode")
 local farmTeamParagraph = farmSection:AddParagraph({ Title = "Team", Content = "—" })
 local farmStatusParagraph = farmSection:AddParagraph({ Title = "Status", Content = "Idle" })
 
--- >>> Hinweis & separater Toggle direkt unter Farm
-local farmCoinsNote = farmSection:AddParagraph({
-    Title = "Hey you!",
-    Content = "Warning: On mobile devices, 'Auto Collect Coins' may cause a crash."
-})
 farmSection:AddToggle("FarmCoinsToggle", {
     Title = "Enable Auto Collect Coins",
     Default = false,
@@ -1560,7 +1568,6 @@ farmSection:AddToggle("FarmCoinsToggle", {
         end
     end
 })
--- <<<
 
 local farmActive = false
 local farmToken = 0
@@ -1594,8 +1601,7 @@ local function applyFarmForTeam()
             setNoclip(true)
             setFly(true)
             setAutoBarrel(true)
-            -- WICHTIG: AutoCoins NICHT mehr automatisch im Farm-Mode aktivieren.
-            updateFarmUI(team, "Fly+Noclip (+Barrel). Coins manuell toggeln.")
+            updateFarmUI(team, "Fly+Noclip (+Barrel). Coins toggle separately.")
         end)
         task.delay(25, function()
             if farmToken ~= token or currentTeamName() ~= team or not farmActive then return end
