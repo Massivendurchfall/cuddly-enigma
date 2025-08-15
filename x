@@ -155,6 +155,15 @@ local coinEspActive, coinLoop, coinConnAdd, coinConnRem = false, nil, nil, nil
 local coinEspColor = Color3.fromRGB(0,255,0)
 local coinTargets = {}
 
+-- >>>>> NEW: Coins Auto-Collect tracker (event/queue-based, mobile-safe)
+local coinAutoParts = {}                        -- set of coin BaseParts to collect
+local coinAutoConnAdd, coinAutoConnRem = nil, nil
+local lastCoinTouch = setmetatable({}, {__mode="k"})  -- weak keys to avoid leaks
+local COIN_TOUCHES_PER_STEP = isMobile and 5 or 15
+local COIN_STEP_DELAY = isMobile and 0.30 or 0.12
+local COIN_DEBOUNCE = isMobile and 0.85 or 0.45
+-- <<<<< NEW (above)
+
 local chamsActive, chamsLoop = false, nil
 local enemyChamColor = Color3.fromRGB(255,0,0)
 local teamChamColor = Color3.fromRGB(0,255,0)
@@ -516,23 +525,47 @@ local function fireTouch(part)
     end)
 end
 
+-- >>>>> NEW: Event-driven, throttled Auto-Collect Coins
+local function startCoinTracker()
+    if coinAutoConnAdd or coinAutoConnRem then return end
+    -- seed existing coins once
+    initialScanAndCache(isCoinPart, coinAutoParts)
+    -- hook future additions/removals
+    coinAutoConnAdd, coinAutoConnRem = hookWorkspace(isCoinPart, coinAutoParts, coinAutoConnAdd, coinAutoConnRem)
+end
+
+local function stopCoinTracker()
+    if coinAutoConnAdd then coinAutoConnAdd:Disconnect(); coinAutoConnAdd=nil end
+    if coinAutoConnRem then coinAutoConnRem:Disconnect(); coinAutoConnRem=nil end
+    coinAutoParts = {}
+    lastCoinTouch = setmetatable({}, {__mode="k"})
+end
+
 local function autoCollectCoinsFunc()
+    -- Throttled loop: touches a small batch per step, debounced per coin
     while autoCollectCoinsActive do
-        pcall(function()
-            local tokenFolder = workspace:FindFirstChild("GameKeeper")
-            tokenFolder = tokenFolder and tokenFolder:FindFirstChild("Map")
-            tokenFolder = tokenFolder and tokenFolder:FindFirstChild("Tokens")
-            if tokenFolder then
-                for _, token in ipairs(tokenFolder:GetDescendants()) do
-                    if token:IsA("BasePart") and (token.Name=="Token" or token:FindFirstChild("TouchInterest") or token:FindFirstChildOfClass("TouchTransmitter")) then
-                        fireTouch(token)
+        local count = 0
+        for token,_ in pairs(coinAutoParts) do
+            if not autoCollectCoinsActive then break end
+            if token and token.Parent then
+                local lt = lastCoinTouch[token] or 0
+                if (tick() - lt) >= COIN_DEBOUNCE then
+                    fireTouch(token)
+                    lastCoinTouch[token] = tick()
+                    count += 1
+                    if count >= COIN_TOUCHES_PER_STEP then
+                        break
                     end
                 end
+            else
+                coinAutoParts[token] = nil
+                lastCoinTouch[token] = nil
             end
-        end)
-        task.wait(0.25)
+        end
+        task.wait(COIN_STEP_DELAY)
     end
 end
+-- <<<<< NEW (above)
 
 local function findEscapeTouchParts()
     local out = {}
@@ -945,12 +978,15 @@ end
 local function setAutoCoins(state)
     if state and not autoCollectCoinsActive then
         autoCollectCoinsActive = true
+        -- start tracker and throttled loop
+        startCoinTracker()
         if autoCollectCoinsThread then task.cancel(autoCollectCoinsThread) end
         autoCollectCoinsThread = task.spawn(autoCollectCoinsFunc)
     end
     if not state and autoCollectCoinsActive then
         autoCollectCoinsActive = false
         if autoCollectCoinsThread then task.cancel(autoCollectCoinsThread); autoCollectCoinsThread=nil end
+        stopCoinTracker()
     end
 end
 
@@ -1543,7 +1579,7 @@ local function applyFarmForTeam()
             setNoclip(true)
             setFly(true)
             setAutoBarrel(true)
-            setAutoCoins(true)
+            setAutoCoins(true) -- nutzt jetzt das gedrosselte, event-basierte System
             updateFarmUI(team, "Fly+Noclip+Collecting")
         end)
         task.delay(25, function()
