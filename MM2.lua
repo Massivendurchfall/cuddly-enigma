@@ -16,6 +16,8 @@ local Rayfield=fetchRayfield()
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
 local UIS=game:GetService("UserInputService")
+local ReplicatedStorage=game:GetService("ReplicatedStorage")
+local TextChatService=game:FindService("TextChatService")
 local LocalPlayer=Players.LocalPlayer
 
 local Window=Rayfield:CreateWindow({
@@ -38,35 +40,21 @@ local STATE={
     WalkSpeed=16,
     Fly=false,FlySpeed=20,
     Noclip=false,
-    AntiAFK=false
+    AntiAFK=false,
+    AutoChat=false,ChatMessage="gg",ChatInterval=30,
+    BeachAutoSpeed=14
 }
 
 local UPDATE_STEP=0.16
 local RECONCILE_STEP=1.0
 local COLLECT_UPDATE=0.25
-local BEACH_SPEED=14
 
 local function hum(c) if not c then return end for _,v in ipairs(c:GetChildren()) do if v:IsA("Humanoid") then return v end end end
-local function rig(char)
-    if not char then return nil,nil end
-    local head=char:FindFirstChild("Head")
-    local root=char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChildWhichIsA("BasePart")
-    if not head then head=root end
-    return root,head
-end
+local function rig(char) if not char then return nil,nil end local head=char:FindFirstChild("Head") local root=char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChildWhichIsA("BasePart") if not head then head=root end return root,head end
 local function hrp(c) local r,_=rig(c); return r end
 local function backpack(p) for _,c in ipairs(p:GetChildren()) do if c:IsA("Backpack") then return c end end end
 
-local function toolKnife(t)
-    if not (t and t:IsA("Tool")) then return false end
-    local n=(t.Name or ""):lower(); if n:find("knife") or n:find("blade") then return true end
-    for _,d in ipairs(t:GetDescendants()) do
-        if d:IsA("MeshPart") or d:IsA("SpecialMesh") then
-            local mid=tostring(d.MeshId or ""):lower(); if mid:find("knife") or mid:find("blade") then return true end
-        end
-    end
-    return false
-end
+local function toolKnife(t) if not (t and t:IsA("Tool")) then return false end local n=(t.Name or ""):lower(); if n:find("knife") or n:find("blade") then return true end for _,d in ipairs(t:GetDescendants()) do if d:IsA("MeshPart") or d:IsA("SpecialMesh") then local mid=tostring(d.MeshId or ""):lower(); if mid:find("knife") or mid:find("blade") then return true end end end return false end
 local function toolGun(t) if not (t and t:IsA("Tool")) then return false end local n=(t.Name or ""):lower(); return n:find("gun") or n:find("revolver") or n:find("pistol") end
 
 local function roleFromAttrs(plr,char)
@@ -86,18 +74,24 @@ end
 local function resolveRole(plr) local c=plr.Character; return roleFromAttrs(plr,c) or roleFromEquip(plr,c) end
 local function colorForRole(r) if r=="murder" then return Color3.fromRGB(255,70,70) elseif r=="sheriff" then return Color3.fromRGB(255,230,0) else return Color3.fromRGB(55,200,255) end end
 
+local function ensureTextLabel(parent, size, bold)
+    local lbl=parent:FindFirstChild("Text")
+    if not lbl then lbl=Instance.new("TextLabel"); lbl.Name="Text"; lbl.BackgroundTransparency=1; lbl.TextScaled=false; lbl.TextSize=size; lbl.Font=bold and Enum.Font.GothamBold or Enum.Font.Gotham; lbl.TextStrokeTransparency=0.5; lbl.Size=UDim2.new(1,0,1,0); lbl.Parent=parent end
+    return lbl
+end
+
 local function ensureESP(char)
     local f=char:FindFirstChild("__ESP"); if not f then f=Instance.new("Folder"); f.Name="__ESP"; f.Parent=char end
     local hl=f:FindFirstChildOfClass("Highlight"); if not hl then hl=Instance.new("Highlight"); hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; hl.FillTransparency=0.72; hl.OutlineTransparency=0; hl.Adornee=char; hl.Parent=f end
-    local nameGui=f:FindFirstChild("NameGui"); if not nameGui then nameGui=Instance.new("BillboardGui"); nameGui.Name="NameGui"; nameGui.AlwaysOnTop=true; nameGui.Size=UDim2.new(0,200,0,18); nameGui.MaxDistance=10000; nameGui.Parent=f; local lbl=Instance.new("TextLabel"); lbl.Name="Text"; lbl.BackgroundTransparency=1; lbl.TextScaled=false; lbl.TextSize=14; lbl.Font=Enum.Font.Gotham; lbl.TextStrokeTransparency=0.5; lbl.Size=UDim2.new(1,0,1,0); lbl.Parent=nameGui end
-    local roleGui=f:FindFirstChild("RoleGui"); if not roleGui then roleGui=Instance.new("BillboardGui"); roleGui.Name="RoleGui"; roleGui.AlwaysOnTop=true; roleGui.Size=UDim2.new(0,160,0,18); roleGui.MaxDistance=10000; roleGui.Parent=f; local lbl=Instance.new("TextLabel"); lbl.Name="Text"; lbl.BackgroundTransparency=1; lbl.TextScaled=false; lbl.TextSize=16; lbl.Font=Enum.Font.GothamBold; lbl.TextStrokeTransparency=0.5; lbl.Size=UDim2.new(1,0,1,0); lbl.Parent=roleGui end
+    local nameGui=f:FindFirstChild("NameGui"); if not nameGui then nameGui=Instance.new("BillboardGui"); nameGui.Name="NameGui"; nameGui.AlwaysOnTop=true; nameGui.Size=UDim2.new(0,200,0,18); nameGui.MaxDistance=10000; nameGui.Parent=f end
+    local roleGui=f:FindFirstChild("RoleGui"); if not roleGui then roleGui=Instance.new("BillboardGui"); roleGui.Name="RoleGui"; roleGui.AlwaysOnTop=true; roleGui.Size=UDim2.new(0,160,0,18); roleGui.MaxDistance=10000; roleGui.Parent=f end
     local root,head=rig(char)
     nameGui.Adornee=head or char
     roleGui.Adornee=root or head or char
     nameGui.StudsOffset=Vector3.new(0,(head and 3.6 or 4.0),0)
     roleGui.StudsOffset=Vector3.new(0,1.8,0)
-    local nameLabel=nameGui:FindFirstChild("Text")
-    local roleLabel=roleGui:FindFirstChild("Text")
+    local nameLabel=ensureTextLabel(nameGui,14,false)
+    local roleLabel=ensureTextLabel(roleGui,16,true)
     return f,hl,nameGui,nameLabel,roleGui,roleLabel
 end
 
@@ -105,13 +99,13 @@ local function applyFor(plr)
     if plr==LocalPlayer then return end
     local c=plr.Character; if not (c and c.Parent) then return end
     local folder,hl,nameGui,nameLabel,roleGui,roleLabel=ensureESP(c)
-    nameLabel.Text=plr.Name
+    if nameLabel then nameLabel.Text=plr.Name end
     nameGui.Enabled=STATE.NameTags
-    nameLabel.Visible=STATE.NameTags
+    if nameLabel then nameLabel.Visible=STATE.NameTags end
     local r=resolveRole(plr)
     local col=colorForRole(r)
     if STATE.PlayerChams then hl.FillColor=col hl.OutlineColor=Color3.new(1,1,1) hl.Enabled=true else hl.Enabled=false end
-    if STATE.RoleESP then roleGui.Enabled=true roleLabel.Text=string.upper(r) roleLabel.TextColor3=col else roleGui.Enabled=false end
+    if STATE.RoleESP then roleGui.Enabled=true if roleLabel then roleLabel.Text=string.upper(r) roleLabel.TextColor3=col end else roleGui.Enabled=false end
 end
 
 local function fullRefresh() for _,pl in ipairs(Players:GetPlayers()) do if pl~=LocalPlayer then applyFor(pl) end end end
@@ -176,6 +170,8 @@ RunService.Heartbeat:Connect(function()
                     local root,head=rig(pl.Character)
                     if f.NameGui.Adornee~=head then f.NameGui.Adornee=head or pl.Character end
                     if f.RoleGui.Adornee~=root then f.RoleGui.Adornee=root or head or pl.Character end
+                    ensureTextLabel(f.NameGui,14,false)
+                    ensureTextLabel(f.RoleGui,16,true)
                 end
             end
         end
@@ -210,8 +206,8 @@ local function ensureCollectESP(part,color,labelText)
     local f=part:FindFirstChild("__CESP"); if not f then f=Instance.new("Folder"); f.Name="__CESP"; f.Parent=part end
     local hl=f:FindFirstChildOfClass("Highlight"); if not hl then hl=Instance.new("Highlight"); hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; hl.FillTransparency=0.7; hl.OutlineTransparency=0; hl.Adornee=part; hl.Parent=f end
     hl.FillColor=color
-    local bg=f:FindFirstChild("Bill"); if not bg then bg=Instance.new("BillboardGui"); bg.Name="Bill"; bg.AlwaysOnTop=true; bg.Size=UDim2.new(0,160,0,18); bg.StudsOffset=Vector3.new(0,2.2,0); bg.Adornee=part; bg.MaxDistance=10000; bg.Parent=f; local lbl=Instance.new("TextLabel"); lbl.Name="Text"; lbl.BackgroundTransparency=1; lbl.TextScaled=false; lbl.TextSize=14; lbl.Font=Enum.Font.GothamBold; lbl.TextStrokeTransparency=0.5; lbl.Size=UDim2.new(1,0,1,0); lbl.Parent=bg end
-    local lbl=bg:FindFirstChild("Text"); lbl.Text=labelText
+    local bg=f:FindFirstChild("Bill"); if not bg then bg=Instance.new("BillboardGui"); bg.Name="Bill"; bg.AlwaysOnTop=true; bg.Size=UDim2.new(0,160,0,18); bg.StudsOffset=Vector3.new(0,2.2,0); bg.Adornee=part; bg.MaxDistance=10000; bg.Parent=f end
+    local lbl=ensureTextLabel(bg,14,true); lbl.Text=labelText
     return f,hl,bg,lbl
 end
 
@@ -262,7 +258,7 @@ scanInitialCollectibles()
 local function updateCollectLabel(part)
     local f=part:FindFirstChild("__CESP"); if not f then return end
     local bg=f:FindFirstChild("Bill"); if not bg then return end
-    local lbl=bg:FindFirstChild("Text"); if not lbl then return end
+    local lbl=ensureTextLabel(bg,14,true)
     local r=hrp(LocalPlayer.Character); if not r then return end
     local id=tostring(part:GetAttribute("CoinID") or "Collectible")
     local dist=(part.Position-r.Position).Magnitude
@@ -341,17 +337,17 @@ local flyMove=Vector3.new()
 local flyUp,flyDown=false,false
 local autopilotVec=nil
 local autopilotSpeed=nil
+local beachTarget=nil
+local beachLastDist=1e9
+local beachStuck=0
+local beachConn={}
 
 local function ensureFlyBody()
     local r=hrp(LocalPlayer.Character); if not r then return end
     if not flyBV then flyBV=Instance.new("BodyVelocity"); flyBV.MaxForce=Vector3.new(1e5,1e5,1e5); flyBV.Velocity=Vector3.new(); flyBV.Parent=r end
     if not flyBG then flyBG=Instance.new("BodyGyro"); flyBG.MaxTorque=Vector3.new(1e5,1e5,1e5); flyBG.P=6e3; flyBG.CFrame=r.CFrame; flyBG.Parent=r end
 end
-
-local function setFly(on)
-    STATE.Fly=on
-    if on then ensureFlyBody() else if flyBV then flyBV:Destroy(); flyBV=nil end if flyBG then flyBG:Destroy(); flyBG=nil end flyMove=Vector3.new() flyUp=false flyDown=false autopilotVec=nil autopilotSpeed=nil end
-end
+local function setFly(on) STATE.Fly=on if on then ensureFlyBody() else if flyBV then flyBV:Destroy(); flyBV=nil end if flyBG then flyBG:Destroy(); flyBG=nil end flyMove=Vector3.new() flyUp=false flyDown=false autopilotVec=nil autopilotSpeed=nil end end
 
 UIS.InputBegan:Connect(function(i,gp)
     if gp then return end
@@ -377,9 +373,7 @@ local function flyStep(dt)
     local r=hrp(LocalPlayer.Character); if not r then return end
     local cam=workspace.CurrentCamera
     local dir=Vector3.new()
-    if autopilotVec then
-        dir=autopilotVec
-    else
+    if autopilotVec then dir=autopilotVec else
         local look=cam.CFrame.LookVector
         local right=cam.CFrame.RightVector
         dir=(right*flyMove.X + look*(-flyMove.Z))
@@ -387,17 +381,11 @@ local function flyStep(dt)
         if flyDown then dir=dir+Vector3.new(0,-1,0) end
         if dir.Magnitude<0.01 then dir=Vector3.new() end
     end
-    local spd=STATE.Fly and STATE.FlySpeed or (autopilotSpeed or BEACH_SPEED)
+    local spd=STATE.Fly and STATE.FlySpeed or (autopilotSpeed or STATE.BeachAutoSpeed)
     flyBV.Velocity=(dir.Magnitude>0 and dir.Unit or Vector3.new())*spd
     flyBG.CFrame=workspace.CurrentCamera.CFrame
 end
-
 RunService.Heartbeat:Connect(function(dt) flyStep(dt) end)
-
-local beachTarget=nil
-local beachLastDist=1e9
-local beachStuck=0
-local beachConn={}
 
 local function clearBeachConn() for _,c in ipairs(beachConn) do pcall(function() c:Disconnect() end) end beachConn={} end
 local function bindBeachTarget(ball)
@@ -421,10 +409,7 @@ end
 
 RunService.Heartbeat:Connect(function(dt)
     local c=LocalPlayer.Character; local h=hum(c); if h and h.WalkSpeed~=STATE.WalkSpeed then h.WalkSpeed=STATE.WalkSpeed end
-    if not STATE.AutoBeachBalls then
-        autopilotVec=nil; autopilotSpeed=nil
-        return
-    end
+    if not STATE.AutoBeachBalls then autopilotVec=nil; autopilotSpeed=nil; return end
     if not STATE.Fly then setFly(true) end
     local root=hrp(LocalPlayer.Character); if not root then return end
     if not beachTarget or not beachTarget.Parent or beachTarget:GetAttribute("Collected")==true then
@@ -445,17 +430,32 @@ RunService.Heartbeat:Connect(function(dt)
         return
     end
     autopilotVec=dir
-    autopilotSpeed=math.clamp(dist*0.6, 6, BEACH_SPEED)
+    autopilotSpeed=math.clamp(dist*0.6, 6, STATE.BeachAutoSpeed)
     if dist>beachLastDist-0.3 then
         beachStuck=beachStuck+dt
-        if beachStuck>0.6 then
-            root.CFrame=CFrame.new(root.Position.X,pos.Y+1.2,root.Position.Z)
-            beachStuck=0
-        end
-    else
-        beachStuck=0
-    end
+        if beachStuck>0.6 then root.CFrame=CFrame.new(root.Position.X,pos.Y+1.2,root.Position.Z); beachStuck=0 end
+    else beachStuck=0 end
     beachLastDist=dist
+end)
+
+local function sendChat(msg)
+    msg=tostring(msg or ""); if msg=="" then return end
+    local ok=false
+    if TextChatService and TextChatService.ChatVersion==Enum.ChatVersion.TextChatService then
+        local ch=TextChatService:FindFirstChild("TextChannels"); ch=ch and ch:FindFirstChild("RBXGeneral")
+        if ch then ok=pcall(function() ch:SendAsync(msg) end) end
+    end
+    if not ok then
+        local ev=ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents"); ev=ev and ev:FindFirstChild("SayMessageRequest")
+        if ev then pcall(function() ev:FireServer(msg,"All") end) end
+    end
+end
+
+task.spawn(function()
+    while true do
+        if STATE.AutoChat and STATE.ChatMessage and #STATE.ChatMessage>0 then sendChat(STATE.ChatMessage) end
+        task.wait(math.max(5,tonumber(STATE.ChatInterval) or 30))
+    end
 end)
 
 local TabESP=Window:CreateTab("ESP",4483362458)
@@ -479,6 +479,11 @@ TabPlayer:CreateToggle({Name="Anti AFK",CurrentValue=STATE.AntiAFK,Callback=func
 
 TabAuto:CreateSection("Automation")
 TabAuto:CreateToggle({Name="Auto Dropped Gun",CurrentValue=STATE.AutoDroppedGun,Callback=function(v) STATE.AutoDroppedGun=v end})
-TabAuto:CreateToggle({Name="Auto Collect Beach Balls (slow fly)",CurrentValue=STATE.AutoBeachBalls,Callback=function(v) STATE.AutoBeachBalls=v; if not v then autopilotVec=nil autopilotSpeed=nil beachTarget=nil end end})
+TabAuto:CreateToggle({Name="Auto Collect Beach Balls",CurrentValue=STATE.AutoBeachBalls,Callback=function(v) STATE.AutoBeachBalls=v; if not v then autopilotVec=nil autopilotSpeed=nil beachTarget=nil end end})
+TabAuto:CreateSlider({Name="BeachBall Auto Speed",Range={6,30},Increment=1,Suffix=" stud/s",CurrentValue=STATE.BeachAutoSpeed,Callback=function(v) STATE.BeachAutoSpeed=v end})
+TabAuto:CreateSection("Auto Chat")
+TabAuto:CreateToggle({Name="Auto Chat",CurrentValue=STATE.AutoChat,Callback=function(v) STATE.AutoChat=v end})
+TabAuto:CreateInput({Name="Chat Message",PlaceholderText="enter message",RemoveTextAfterFocusLost=false,Callback=function(text) STATE.ChatMessage=tostring(text or "") end})
+TabAuto:CreateSlider({Name="Interval (s)",Range={5,300},Increment=1,Suffix=" s",CurrentValue=STATE.ChatInterval,Callback=function(v) STATE.ChatInterval=v end})
 
-Rayfield:Notify({Title="Ready",Content="Slower beach-ball autopilot with instant retarget on pickup",Duration=5})
+Rayfield:Notify({Title="Ready",Content="Fixed labels, stable rounds, BeachBall speed slider + retarget",Duration=5})
