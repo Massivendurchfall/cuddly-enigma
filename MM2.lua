@@ -15,6 +15,7 @@ end
 local Rayfield=fetchRayfield()
 local Players=game:GetService("Players")
 local RunService=game:GetService("RunService")
+local UIS=game:GetService("UserInputService")
 local LocalPlayer=Players.LocalPlayer
 
 local Window=Rayfield:CreateWindow({
@@ -35,6 +36,7 @@ local STATE={
     AutoBeachBalls=false,
     AutoDroppedGun=false,
     WalkSpeed=16,
+    Fly=false,FlySpeed=20,
     Noclip=false,
     AntiAFK=false
 }
@@ -42,7 +44,7 @@ local STATE={
 local UPDATE_STEP=0.16
 local RECONCILE_STEP=1.0
 local COLLECT_UPDATE=0.25
-local BEACH_SPEED=20
+local BEACH_SPEED=14
 
 local function hum(c) if not c then return end for _,v in ipairs(c:GetChildren()) do if v:IsA("Humanoid") then return v end end end
 local function rig(char)
@@ -112,9 +114,7 @@ local function applyFor(plr)
     if STATE.RoleESP then roleGui.Enabled=true roleLabel.Text=string.upper(r) roleLabel.TextColor3=col else roleGui.Enabled=false end
 end
 
-local function fullRefresh()
-    for _,pl in ipairs(Players:GetPlayers()) do if pl~=LocalPlayer then applyFor(pl) end end
-end
+local function fullRefresh() for _,pl in ipairs(Players:GetPlayers()) do if pl~=LocalPlayer then applyFor(pl) end end end
 
 local function disableAllVisuals()
     for _,pl in ipairs(Players:GetPlayers()) do
@@ -129,11 +129,7 @@ local function disableAllVisuals()
     end
 end
 
-local function bindBackpack(plr)
-    local function hook(bp) if not bp then return end bp.ChildAdded:Connect(function() applyFor(plr) end) bp.ChildRemoved:Connect(function() applyFor(plr) end) end
-    local bp=backpack(plr); if bp then hook(bp) end
-    plr.ChildAdded:Connect(function(ch) if ch:IsA("Backpack") then hook(ch) end end)
-end
+local function backpackHook(plr,bp) if not bp then return end bp.ChildAdded:Connect(function() applyFor(plr) end) bp.ChildRemoved:Connect(function() applyFor(plr) end) end
 
 local conns={}
 local function bindCharacter(plr,char)
@@ -146,13 +142,11 @@ local function bindCharacter(plr,char)
     applyFor(plr)
 end
 
-local function unbind(plr)
-    local arr=conns[plr]; if arr then for _,c in ipairs(arr) do pcall(function() c:Disconnect() end) end end
-    conns[plr]=nil
-end
+local function unbind(plr) local arr=conns[plr]; if arr then for _,c in ipairs(arr) do pcall(function() c:Disconnect() end) end end conns[plr]=nil end
 
 local function wire(plr)
-    bindBackpack(plr)
+    local bp=backpack(plr); if bp then backpackHook(plr,bp) end
+    plr.ChildAdded:Connect(function(ch) if ch:IsA("Backpack") then backpackHook(plr,ch) end end)
     if plr.Character then bindCharacter(plr,plr.Character) end
     plr.CharacterAdded:Connect(function(c) task.wait(0.3); bindCharacter(plr,c) end)
     plr.CharacterRemoving:Connect(function() unbind(plr) end)
@@ -190,15 +184,13 @@ RunService.Heartbeat:Connect(function()
 end)
 
 RunService.Stepped:Connect(function()
-    if not (STATE.Noclip or STATE.AutoBeachBalls) then return end
+    if not (STATE.Noclip or STATE.AutoBeachBalls or STATE.Fly) then return end
     local c=LocalPlayer.Character; if not c then return end
     for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end
 end)
 
 local vu=game:GetService("VirtualUser")
-LocalPlayer.Idled:Connect(function()
-    if STATE.AntiAFK then vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame); task.wait(0.8); vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame) end
-end)
+LocalPlayer.Idled:Connect(function() if STATE.AntiAFK then vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame); task.wait(0.8); vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame) end end)
 
 local function isCollectible(part)
     if not (part and part:IsA("BasePart")) then return false end
@@ -321,23 +313,19 @@ local function findDroppedGunFast()
     end
 end
 
-local function partPos(obj)
+local function partFrom(obj)
     if not obj then return nil end
-    if obj:IsA("BasePart") then return obj.Position end
-    local bp=obj:FindFirstChildWhichIsA("BasePart",true)
-    return bp and bp.Position or nil
+    if obj:IsA("BasePart") then return obj end
+    if obj:IsA("Tool") then return obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart",true) end
+    return obj:FindFirstChildWhichIsA("BasePart",true)
 end
 
 local function touchSmart(obj)
     local root=hrp(LocalPlayer.Character); if not root or not obj then return end
-    local target
-    if obj:IsA("Tool") then target=obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart",true)
-    elseif obj:IsA("BasePart") then target=obj
-    else target=obj:FindFirstChildWhichIsA("BasePart",true) end
-    if not target then return end
+    local target=partFrom(obj); if not target then return end
     if typeof(firetouchinterest)=="function" then firetouchinterest(root,target,0); task.wait(0.05); firetouchinterest(root,target,1) end
-    local hasGun=(backpack(LocalPlayer) and backpack(LocalPlayer):FindFirstChildWhichIsA("Tool")) or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Tool"))
-    if hasGun then return end
+    local hasTool=(backpack(LocalPlayer) and backpack(LocalPlayer):FindFirstChildWhichIsA("Tool")) or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Tool"))
+    if hasTool then return end
     local old=root.CFrame; root.CFrame=target.CFrame*CFrame.new(0,3,0); task.wait(0.06); root.CFrame=old
 end
 
@@ -348,26 +336,100 @@ task.spawn(function()
     end
 end)
 
+local flyBV,flyBG=nil,nil
+local flyMove=Vector3.new()
+local flyUp,flyDown=false,false
+local autopilotVec=nil
+local autopilotSpeed=nil
+
+local function ensureFlyBody()
+    local r=hrp(LocalPlayer.Character); if not r then return end
+    if not flyBV then flyBV=Instance.new("BodyVelocity"); flyBV.MaxForce=Vector3.new(1e5,1e5,1e5); flyBV.Velocity=Vector3.new(); flyBV.Parent=r end
+    if not flyBG then flyBG=Instance.new("BodyGyro"); flyBG.MaxTorque=Vector3.new(1e5,1e5,1e5); flyBG.P=6e3; flyBG.CFrame=r.CFrame; flyBG.Parent=r end
+end
+
+local function setFly(on)
+    STATE.Fly=on
+    if on then ensureFlyBody() else if flyBV then flyBV:Destroy(); flyBV=nil end if flyBG then flyBG:Destroy(); flyBG=nil end flyMove=Vector3.new() flyUp=false flyDown=false autopilotVec=nil autopilotSpeed=nil end
+end
+
+UIS.InputBegan:Connect(function(i,gp)
+    if gp then return end
+    local kc=i.KeyCode
+    if kc==Enum.KeyCode.W then flyMove=Vector3.new(0,0,-1)
+    elseif kc==Enum.KeyCode.S then flyMove=Vector3.new(0,0,1)
+    elseif kc==Enum.KeyCode.A then flyMove=Vector3.new(-1,0,0)
+    elseif kc==Enum.KeyCode.D then flyMove=Vector3.new(1,0,0)
+    elseif kc==Enum.KeyCode.Space then flyUp=true
+    elseif kc==Enum.KeyCode.LeftControl or kc==Enum.KeyCode.C then flyDown=true end
+end)
+UIS.InputEnded:Connect(function(i,gp)
+    if gp then return end
+    local kc=i.KeyCode
+    if kc==Enum.KeyCode.W or kc==Enum.KeyCode.S or kc==Enum.KeyCode.A or kc==Enum.KeyCode.D then flyMove=Vector3.new()
+    elseif kc==Enum.KeyCode.Space then flyUp=false
+    elseif kc==Enum.KeyCode.LeftControl or kc==Enum.KeyCode.C then flyDown=false end
+end)
+
+local function flyStep(dt)
+    if not STATE.Fly and not autopilotVec then return end
+    ensureFlyBody()
+    local r=hrp(LocalPlayer.Character); if not r then return end
+    local cam=workspace.CurrentCamera
+    local dir=Vector3.new()
+    if autopilotVec then
+        dir=autopilotVec
+    else
+        local look=cam.CFrame.LookVector
+        local right=cam.CFrame.RightVector
+        dir=(right*flyMove.X + look*(-flyMove.Z))
+        if flyUp then dir=dir+Vector3.new(0,1,0) end
+        if flyDown then dir=dir+Vector3.new(0,-1,0) end
+        if dir.Magnitude<0.01 then dir=Vector3.new() end
+    end
+    local spd=STATE.Fly and STATE.FlySpeed or (autopilotSpeed or BEACH_SPEED)
+    flyBV.Velocity=(dir.Magnitude>0 and dir.Unit or Vector3.new())*spd
+    flyBG.CFrame=workspace.CurrentCamera.CFrame
+end
+
+RunService.Heartbeat:Connect(function(dt) flyStep(dt) end)
+
 local beachTarget=nil
 local beachLastDist=1e9
 local beachStuck=0
+local beachConn={}
+
+local function clearBeachConn() for _,c in ipairs(beachConn) do pcall(function() c:Disconnect() end) end beachConn={} end
+local function bindBeachTarget(ball)
+    clearBeachConn()
+    if not ball then return end
+    table.insert(beachConn, ball.Destroying:Connect(function() beachTarget=nil end))
+    table.insert(beachConn, ball:GetAttributeChangedSignal("Collected"):Connect(function() if ball:GetAttribute("Collected")==true then beachTarget=nil end end))
+end
+
+local function nearestBeachBall()
+    local r=hrp(LocalPlayer.Character); if not r then return nil end
+    local best,bd=nil,1e9
+    for _,p in ipairs(beachList) do
+        if p and p.Parent and p:GetAttribute("Collected")~=true then
+            local d=(p.Position-r.Position).Magnitude
+            if d<bd then bd, best=d, p end
+        end
+    end
+    return best
+end
 
 RunService.Heartbeat:Connect(function(dt)
-    if not STATE.AutoBeachBalls then return end
-    local root=hrp(LocalPlayer.Character); if not root then return end
-    local function nearestBall()
-        local r=hrp(LocalPlayer.Character); if not r then return nil end
-        local best,bd=nil,1e9
-        for _,p in ipairs(beachList) do
-            if p and p.Parent and p:GetAttribute("Collected")~=true then
-                local d=(p.Position-r.Position).Magnitude
-                if d<bd then bd, best=d, p end
-            end
-        end
-        return best
+    local c=LocalPlayer.Character; local h=hum(c); if h and h.WalkSpeed~=STATE.WalkSpeed then h.WalkSpeed=STATE.WalkSpeed end
+    if not STATE.AutoBeachBalls then
+        autopilotVec=nil; autopilotSpeed=nil
+        return
     end
+    if not STATE.Fly then setFly(true) end
+    local root=hrp(LocalPlayer.Character); if not root then return end
     if not beachTarget or not beachTarget.Parent or beachTarget:GetAttribute("Collected")==true then
-        beachTarget=nearestBall()
+        beachTarget=nearestBeachBall()
+        bindBeachTarget(beachTarget)
         beachLastDist=1e9
         beachStuck=0
         return
@@ -376,22 +438,18 @@ RunService.Heartbeat:Connect(function(dt)
     local cur=root.Position
     local dir=(pos-cur)
     local dist=dir.Magnitude
-    if dist<3 then
+    if dist<4 then
         if typeof(firetouchinterest)=="function" then firetouchinterest(root,beachTarget,0); task.wait(); firetouchinterest(root,beachTarget,1) end
         root.CFrame=CFrame.new(pos+Vector3.new(0,0.4,0))
+        beachTarget=nil
         return
     end
-    local step=math.min(dist,BEACH_SPEED*dt)
-    if step>0 then
-        local cf=CFrame.lookAt(cur,cur+dir)
-        root.CFrame=cf+cf.LookVector*step
-    end
+    autopilotVec=dir
+    autopilotSpeed=math.clamp(dist*0.6, 6, BEACH_SPEED)
     if dist>beachLastDist-0.3 then
         beachStuck=beachStuck+dt
         if beachStuck>0.6 then
             root.CFrame=CFrame.new(root.Position.X,pos.Y+1.2,root.Position.Z)
-            local nud=(pos-root.Position).Unit
-            root.CFrame=CFrame.lookAt(root.Position,root.Position+nud)+nud*math.min(4,BEACH_SPEED*dt*2)
             beachStuck=0
         end
     else
@@ -414,11 +472,13 @@ TabESP:CreateToggle({Name="BeachBall ESP",CurrentValue=STATE.BeachBallESP,Callba
 TabPlayer:CreateSection("Movement")
 TabPlayer:CreateSlider({Name="WalkSpeed",Range={16,32},Increment=1,Suffix=" stud/s",CurrentValue=STATE.WalkSpeed,Callback=function(v) STATE.WalkSpeed=v; local h=hum(LocalPlayer.Character); if h then h.WalkSpeed=v end end})
 TabPlayer:CreateButton({Name="Reset Speed",Callback=function() STATE.WalkSpeed=16; local h=hum(LocalPlayer.Character); if h then h.WalkSpeed=16 end end})
+TabPlayer:CreateToggle({Name="Fly",CurrentValue=STATE.Fly,Callback=function(v) setFly(v) end})
+TabPlayer:CreateSlider({Name="Fly Speed",Range={10,50},Increment=1,Suffix=" stud/s",CurrentValue=STATE.FlySpeed,Callback=function(v) STATE.FlySpeed=v end})
 TabPlayer:CreateToggle({Name="Noclip",CurrentValue=STATE.Noclip,Callback=function(v) STATE.Noclip=v end})
 TabPlayer:CreateToggle({Name="Anti AFK",CurrentValue=STATE.AntiAFK,Callback=function(v) STATE.AntiAFK=v end})
 
 TabAuto:CreateSection("Automation")
 TabAuto:CreateToggle({Name="Auto Dropped Gun",CurrentValue=STATE.AutoDroppedGun,Callback=function(v) STATE.AutoDroppedGun=v end})
-TabAuto:CreateToggle({Name="Auto Collect Beach Balls (slow fly)",CurrentValue=STATE.AutoBeachBalls,Callback=function(v) STATE.AutoBeachBalls=v; if not v then beachTarget=nil end end})
+TabAuto:CreateToggle({Name="Auto Collect Beach Balls (slow fly)",CurrentValue=STATE.AutoBeachBalls,Callback=function(v) STATE.AutoBeachBalls=v; if not v then autopilotVec=nil autopilotSpeed=nil beachTarget=nil end end})
 
-Rayfield:Notify({Title="Ready",Content="BeachBall auto-collect: always enters the ball, with anti-stuck",Duration=5})
+Rayfield:Notify({Title="Ready",Content="Slower beach-ball autopilot with instant retarget on pickup",Duration=5})
