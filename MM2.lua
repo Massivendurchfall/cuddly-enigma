@@ -50,9 +50,8 @@ local STATE={
     HitboxHeight=1.8
 }
 
-local UPDATE_STEP=0.16
-local RECONCILE_STEP=1.0
-local HARD_REFRESH_STEP=0.75
+local UPDATE_STEP=0.25
+local RECONCILE_STEP=2.5
 local COLLECT_UPDATE=0.25
 
 local function hum(c) if not c then return end for _,v in ipairs(c:GetChildren()) do if v:IsA("Humanoid") then return v end end end
@@ -167,14 +166,28 @@ for _,p in ipairs(Players:GetPlayers()) do wire(p) end
 Players.PlayerAdded:Connect(wire)
 Players.PlayerRemoving:Connect(function(plr) unbind(plr) end)
 
+local lastNoClipApplied=false
 local function restoreCollision()
     local c=LocalPlayer.Character; if not c then return end
     for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=true end end
 end
+task.spawn(function()
+    while true do
+        local needsNoClip = STATE.Noclip or STATE.AutoBeachBalls or STATE.Fly
+        if needsNoClip then
+            local c=LocalPlayer.Character
+            if c then for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end
+            lastNoClipApplied=true
+        elseif lastNoClipApplied then
+            restoreCollision()
+            lastNoClipApplied=false
+        end
+        task.wait(0.2)
+    end
+end)
 
 local rr,lastStep=1,0
 local lastRecon=0
-local lastHard=0
 RunService.Heartbeat:Connect(function()
     local c=LocalPlayer.Character; local h=hum(c)
     if h and h.WalkSpeed~=STATE.WalkSpeed then h.WalkSpeed=STATE.WalkSpeed end
@@ -202,21 +215,6 @@ RunService.Heartbeat:Connect(function()
         end
         lastRecon=time()
     end
-    if time()-lastHard>=HARD_REFRESH_STEP and (STATE.PlayerChams or STATE.RoleESP or STATE.NameTags or STATE.ExpandHitbox) then
-        fullRefresh()
-        lastHard=time()
-    end
-end)
-
-local function setNoclip(on)
-    STATE.Noclip=on
-    if not on then restoreCollision() end
-end
-
-RunService.Stepped:Connect(function()
-    if not (STATE.Noclip or STATE.AutoBeachBalls or STATE.Fly) then return end
-    local c=LocalPlayer.Character; if not c then return end
-    for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end
 end)
 
 local vu=game:GetService("VirtualUser")
@@ -273,6 +271,7 @@ local function addBeachBall(part)
 end
 
 local function scanInitialCollectibles()
+    if not (STATE.CollectibleESP or STATE.BeachBallESP or STATE.AutoBeachBalls) then return end
     for _,d in ipairs(workspace:GetDescendants()) do
         if d:IsA("BasePart") and isCollectible(d) then
             local id=d:GetAttribute("CoinID")
@@ -282,15 +281,16 @@ local function scanInitialCollectibles()
 end
 
 workspace.DescendantAdded:Connect(function(d)
-    if not d:IsA("BasePart") then return end
-    if d.Name and string.sub(d.Name,1,2)=="__" then return end
-    if not isCollectible(d) then return end
-    task.defer(function()
-        local id=d:GetAttribute("CoinID")
-        if id=="BeachBall" then addBeachBall(d) else addCollectible(d) end
-    end)
+    if not (STATE.CollectibleESP or STATE.BeachBallESP or STATE.AutoBeachBalls) then return end
+    if d:IsA("BasePart") then
+        if d.Name and string.sub(d.Name,1,2)=="__" then return end
+        if not isCollectible(d) then return end
+        task.defer(function()
+            local id=d:GetAttribute("CoinID")
+            if id=="BeachBall" then addBeachBall(d) else addCollectible(d) end
+        end)
+    end
 end)
-scanInitialCollectibles()
 
 local function updateCollectLabel(part)
     if not (part and part.Parent) then return end
@@ -318,43 +318,13 @@ task.spawn(function()
     end
 end)
 
-local gunQueue={}
-local lastGunSweep=0
-workspace.DescendantAdded:Connect(function(d)
-    if d:IsA("Tool") then
-        local n=(d.Name or ""):lower()
-        if n:find("gun") or n:find("revolver") or n:find("pistol") then table.insert(gunQueue,d) end
-    elseif d:IsA("BasePart") then
-        local n=(d.Name or ""):lower()
-        if n:find("gun") and d.Parent==workspace then table.insert(gunQueue,d) end
-    end
-end)
-
-local function findDroppedGunFast()
-    for i=#gunQueue,1,-1 do
-        local g=gunQueue[i]
-        if not g or not g.Parent then table.remove(gunQueue,i) else return g end
-    end
-    if time()-lastGunSweep<3 then return nil end
-    lastGunSweep=time()
-    for _,d in ipairs(workspace:GetDescendants()) do
-        if d:IsA("Tool") then
-            local n=(d.Name or ""):lower()
-            if (n:find("gun") or n:find("revolver") or n:find("pistol")) and not d:FindFirstChildWhichIsA("Humanoid") then return d end
-        elseif d:IsA("BasePart") then
-            local n=(d.Name or ""):lower()
-            if n:find("gun") and d.Parent==workspace then return d end
-        end
-    end
-end
-
+local AUTO_GUN_RADIUS=140
 local function partFrom(obj)
     if not obj then return nil end
     if obj:IsA("BasePart") then return obj end
     if obj:IsA("Tool") then return obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart",true) end
     return obj:FindFirstChildWhichIsA("BasePart",true)
 end
-
 local function equipGunNow()
     if not STATE.AutoGun then return end
     local c=LocalPlayer.Character; if not c then return end
@@ -363,7 +333,6 @@ local function equipGunNow()
     local bp=backpack(LocalPlayer)
     if bp then for _,t in ipairs(bp:GetChildren()) do if t:IsA("Tool") and toolGun(t) then h:EquipTool(t) return end end end
 end
-
 local function touchSmart(obj)
     local root=hrp(LocalPlayer.Character); if not root or not obj then return end
     local target=partFrom(obj); if not target then return end
@@ -371,22 +340,36 @@ local function touchSmart(obj)
     local old=root.CFrame; root.CFrame=target.CFrame*CFrame.new(0,3,0); task.wait(0.06); root.CFrame=old
     task.delay(0.05,equipGunNow)
 end
-
-local function wireAutoGun()
-    local function onAdded(x) if not STATE.AutoGun then return end if x:IsA("Tool") and toolGun(x) then task.defer(equipGunNow) end end
-    if LocalPlayer.Character then LocalPlayer.Character.ChildAdded:Connect(onAdded) end
-    LocalPlayer.CharacterAdded:Connect(function(ch) ch.ChildAdded:Connect(onAdded) end)
-    local bp=backpack(LocalPlayer); if bp then bp.ChildAdded:Connect(onAdded) end
-    LocalPlayer.ChildAdded:Connect(function(o) if o:IsA("Backpack") then o.ChildAdded:Connect(onAdded) end end)
-end
-wireAutoGun()
-
-task.spawn(function()
-    while true do
-        if STATE.AutoGun then local g=findDroppedGunFast(); if g and g.Parent then touchSmart(g) end end
-        task.wait(0.25)
+local autoGun={on=false,conns={},loop=nil,tick=0}
+local function disconnectAutoGun() for _,c in ipairs(autoGun.conns) do pcall(function() c:Disconnect() end) end autoGun.conns={} autoGun.on=false end
+local function findNearbyGun()
+    local root=hrp(LocalPlayer.Character); if not root then return end
+    local params=OverlapParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude; params.FilterDescendantsInstances={LocalPlayer.Character}
+    local parts=workspace:GetPartBoundsInRadius(root.Position,AUTO_GUN_RADIUS,params)
+    for _,p in ipairs(parts) do
+        local t=p:FindFirstAncestorOfClass("Tool")
+        if t and toolGun(t) then return t end
+        if not t and p:IsA("BasePart") then
+            local n=(p.Name or ""):lower()
+            if p.Parent==workspace and (n:find("gun") or n:find("revolver") or n:find("pistol")) then return p end
+        end
     end
-end)
+end
+local function setAutoGun(on)
+    if on==autoGun.on then return end
+    if not on then disconnectAutoGun() STATE.AutoGun=false return end
+    STATE.AutoGun=true autoGun.on=true disconnectAutoGun()
+    table.insert(autoGun.conns, LocalPlayer.CharacterAdded:Connect(function(ch) table.insert(autoGun.conns, ch.ChildAdded:Connect(function(x) if x:IsA("Tool") and toolGun(x) then task.defer(equipGunNow) end end) ) end))
+    if LocalPlayer.Character then table.insert(autoGun.conns, LocalPlayer.Character.ChildAdded:Connect(function(x) if x:IsA("Tool") and toolGun(x) then task.defer(equipGunNow) end end)) end
+    local bp=backpack(LocalPlayer); if bp then table.insert(autoGun.conns, bp.ChildAdded:Connect(function(x) if x:IsA("Tool") and toolGun(x) then task.defer(equipGunNow) end end)) end
+    table.insert(autoGun.conns, LocalPlayer.ChildAdded:Connect(function(o) if o:IsA("Backpack") then o.ChildAdded:Connect(function(x) if x:IsA("Tool") and toolGun(x) then task.defer(equipGunNow) end end) end end))
+    task.spawn(function()
+        while autoGun.on do
+            if time()-autoGun.tick>=0.35 then local g=findNearbyGun(); if g and g.Parent then autoGun.tick=time() touchSmart(g) end end
+            task.wait(0.15)
+        end
+    end)
+end
 
 local flyBV,flyBG=nil,nil
 local flyMove=Vector3.new()
@@ -397,6 +380,7 @@ local beachTarget=nil
 local beachLastDist=1e9
 local beachStuck=0
 local beachConn={}
+local noBallSince=0
 
 local function ensureFlyBody()
     local r=hrp(LocalPlayer.Character); if not r then return end
@@ -450,24 +434,41 @@ local function bindBeachTarget(ball)
     table.insert(beachConn, ball:GetAttributeChangedSignal("Collected"):Connect(function() if ball:GetAttribute("Collected")==true then beachTarget=nil end end))
 end
 
+local function validBeachBall(p)
+    return p and p.Parent and p:IsA("BasePart") and p:GetAttribute("CoinID")=="BeachBall" and p:GetAttribute("Collected")~=true
+end
+local function anyValidBeach()
+    for _,p in ipairs(beachList) do if validBeachBall(p) then return true end end
+end
+local function rescanBeachBalls()
+    beachMap,beachList={},{}
+    for _,d in ipairs(workspace:GetDescendants()) do
+        if d:IsA("BasePart") and d:GetAttribute("CoinID")=="BeachBall" then addBeachBall(d) end
+    end
+end
+
 local function nearestBeachBall()
     local r=hrp(LocalPlayer.Character); if not r then return nil end
     local best,bd=nil,1e9
     for _,p in ipairs(beachList) do
-        if p and p.Parent and p:GetAttribute("Collected")~=true then
+        if validBeachBall(p) then
             local d=(p.Position-r.Position).Magnitude
-            if d<bd then bd, best=d, p end
+            if d<bd then bd,best=d,p end
         end
     end
     return best
 end
 
+LocalPlayer.CharacterAdded:Connect(function()
+    if STATE.AutoBeachBalls then task.delay(1.2, rescanBeachBalls) end
+end)
+
 RunService.Heartbeat:Connect(function(dt)
     local c=LocalPlayer.Character; local h=hum(c); if h and h.WalkSpeed~=STATE.WalkSpeed then h.WalkSpeed=STATE.WalkSpeed end
     if not STATE.AutoBeachBalls then
-        autopilotVec=nil; autopilotSpeed=nil; beachTarget=nil; beachLastDist=1e9; beachStuck=0
+        autopilotVec=nil; autopilotSpeed=nil; beachTarget=nil; beachLastDist=1e9; beachStuck=0; noBallSince=0
         if STATE.Fly then setFly(false) end
-        if STATE.Noclip then setNoclip(false) end
+        if STATE.Noclip then STATE.Noclip=false restoreCollision() end
         return
     end
     if not STATE.Fly then setFly(true) end
@@ -475,7 +476,20 @@ RunService.Heartbeat:Connect(function(dt)
     if (not beachTarget) or (not beachTarget.Parent) or (beachTarget:GetAttribute("Collected")==true) then
         beachTarget=nearestBeachBall()
         clearBeachConn()
-        if beachTarget then bindBeachTarget(beachTarget) beachLastDist=1e9 beachStuck=0 else autopilotVec=nil autopilotSpeed=nil end
+        if beachTarget then
+            bindBeachTarget(beachTarget)
+            beachLastDist=1e9
+            beachStuck=0
+            noBallSince=0
+        else
+            autopilotVec=nil
+            autopilotSpeed=nil
+            noBallSince=noBallSince+dt
+            if noBallSince>1.8 then
+                rescanBeachBalls()
+                noBallSince=0
+            end
+        end
         return
     end
     local pos=beachTarget.Position
@@ -528,20 +542,20 @@ TabESP:CreateSection("General")
 TabESP:CreateToggle({Name="All Player Chams",CurrentValue=STATE.PlayerChams,Callback=function(v) STATE.PlayerChams=v; if v then fullRefresh() else disableAllVisuals() end end})
 TabESP:CreateToggle({Name="Role ESP",CurrentValue=STATE.RoleESP,Callback=function(v) STATE.RoleESP=v; if v then fullRefresh() else disableAllVisuals() end end})
 TabESP:CreateToggle({Name="Name Tags",CurrentValue=STATE.NameTags,Callback=function(v) STATE.NameTags=v; if v then fullRefresh() else if not (STATE.PlayerChams or STATE.RoleESP) then disableAllVisuals() end end end})
-TabESP:CreateToggle({Name="Collectible ESP",CurrentValue=STATE.CollectibleESP,Callback=function(v) STATE.CollectibleESP=v; for _,p in ipairs(collectList) do if p and p.Parent then setCollectVisible(p,v) end end end})
-TabESP:CreateToggle({Name="BeachBall ESP",CurrentValue=STATE.BeachBallESP,Callback=function(v) STATE.BeachBallESP=v; for _,p in ipairs(beachList) do if p and p.Parent then setCollectVisible(p,v) end end end})
+TabESP:CreateToggle({Name="Collectible ESP",CurrentValue=STATE.CollectibleESP,Callback=function(v) STATE.CollectibleESP=v; if v then scanInitialCollectibles() end for _,p in ipairs(collectList) do if p and p.Parent then setCollectVisible(p,v) end end end})
+TabESP:CreateToggle({Name="BeachBall ESP",CurrentValue=STATE.BeachBallESP,Callback=function(v) STATE.BeachBallESP=v; if v then scanInitialCollectibles() end for _,p in ipairs(beachList) do if p and p.Parent then setCollectVisible(p,v) end end end})
 
 TabPlayer:CreateSection("Movement")
 TabPlayer:CreateSlider({Name="WalkSpeed",Range={16,32},Increment=1,Suffix=" stud/s",CurrentValue=STATE.WalkSpeed,Callback=function(v) STATE.WalkSpeed=v; local h=hum(LocalPlayer.Character); if h then h.WalkSpeed=v end end})
 TabPlayer:CreateButton({Name="Reset Speed",Callback=function() STATE.WalkSpeed=16; local h=hum(LocalPlayer.Character); if h then h.WalkSpeed=16 end end})
 TabPlayer:CreateToggle({Name="Fly",CurrentValue=STATE.Fly,Callback=function(v) setFly(v) end})
 TabPlayer:CreateSlider({Name="Fly Speed",Range={10,50},Increment=1,Suffix=" stud/s",CurrentValue=STATE.FlySpeed,Callback=function(v) STATE.FlySpeed=v end})
-TabPlayer:CreateToggle({Name="Noclip",CurrentValue=STATE.Noclip,Callback=function(v) setNoclip(v) end})
+TabPlayer:CreateToggle({Name="Noclip",CurrentValue=STATE.Noclip,Callback=function(v) STATE.Noclip=v end})
 TabPlayer:CreateToggle({Name="Anti AFK",CurrentValue=STATE.AntiAFK,Callback=function(v) STATE.AntiAFK=v end})
 
 TabAuto:CreateSection("Automation")
-TabAuto:CreateToggle({Name="Auto Gun (pickup + equip)",CurrentValue=STATE.AutoGun,Callback=function(v) STATE.AutoGun=v; if v then equipGunNow() end end})
-TabAuto:CreateToggle({Name="Auto Collect Beach Balls",CurrentValue=STATE.AutoBeachBalls,Callback=function(v) STATE.AutoBeachBalls=v; if not v then autopilotVec=nil autopilotSpeed=nil beachTarget=nil if STATE.Fly then setFly(false) end if STATE.Noclip then setNoclip(false) end end end})
+TabAuto:CreateToggle({Name="Auto Gun (pickup + equip)",CurrentValue=STATE.AutoGun,Callback=function(v) setAutoGun(v) end})
+TabAuto:CreateToggle({Name="Auto Collect Beach Balls",CurrentValue=STATE.AutoBeachBalls,Callback=function(v) STATE.AutoBeachBalls=v; if v then rescanBeachBalls() else autopilotVec=nil autopilotSpeed=nil beachTarget=nil if STATE.Fly then setFly(false) end if STATE.Noclip then STATE.Noclip=false restoreCollision() end end end})
 TabAuto:CreateSlider({Name="BeachBall Auto Speed",Range={6,30},Increment=1,Suffix=" stud/s",CurrentValue=STATE.BeachAutoSpeed,Callback=function(v) STATE.BeachAutoSpeed=v end})
 
 TabAuto:CreateSection("Combat")
@@ -555,4 +569,4 @@ TabAuto:CreateToggle({Name="Auto Chat",CurrentValue=STATE.AutoChat,Callback=func
 TabAuto:CreateInput({Name="Chat Message",PlaceholderText="enter message",RemoveTextAfterFocusLost=false,Callback=function(text) STATE.ChatMessage=tostring(text or "") end})
 TabAuto:CreateSlider({Name="Interval (s)",Range={5,300},Increment=1,Suffix=" s",CurrentValue=STATE.ChatInterval,Callback=function(v) STATE.ChatInterval=v end})
 
-Rayfield:Notify({Title="Ready",Content="Visible hitbox + no lag, Fly/Noclip turn off when Auto Beach Balls is off",Duration=5})
+Rayfield:Notify({Title="Ready",Content="Auto BeachBall survives new rounds (rescan), Fly/Noclip off when disabled",Duration=5})
