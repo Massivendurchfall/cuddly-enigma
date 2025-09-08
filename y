@@ -1,14 +1,37 @@
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
-local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local VoiceChatService = game:GetService("VoiceChatService")
+local VirtualUser = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
+
+local Window = Rayfield:CreateWindow({
+    Name = "Voice Ban Bypasser",
+    LoadingTitle = "Voice Ban Bypasser",
+    LoadingSubtitle = "by jlcfg",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "RayfieldScript_MicUp",
+        FileName = "Config"
+    },
+    Discord = {
+        Enabled = false,
+        Invite = "",
+        RememberJoins = true
+    },
+    KeySystem = false
+})
+
+local Tabs = {
+    Player = Window:CreateTab("Player"),
+    ESP = Window:CreateTab("ESP"),
+    Voice = Window:CreateTab("Voice"),
+    Info = Window:CreateTab("Info")
+}
 
 local function reEnableMovement()
     local char = LocalPlayer.Character
@@ -23,50 +46,6 @@ local function reEnableMovement()
     end
 end
 
-local collectCoords = {
-    Vector3.new(3510.47, 177.41, 1198.01),
-    Vector3.new(3432.29, 155.51, 1137.61),
-    Vector3.new(3476.75, -126.64, 968.31),
-    Vector3.new(3346.27, -106.83, 1133.09)
-}
-
-local autoCollectActive = false
-local autoCollectTask
-local undergroundActive = false
-local undergroundTask
-
-local function autoCollectMoney()
-    enableFly()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
-    if not root then return end
-    for _, coord in ipairs(collectCoords) do
-        root.CFrame = CFrame.new(coord)
-        reEnableMovement()
-        task.wait(0.05)
-        root.CFrame = root.CFrame + Vector3.new(0, -3, 0)
-        task.wait(0.1)
-        root.CFrame = root.CFrame + Vector3.new(0, 6, 0)
-        task.wait(0.5)
-    end
-end
-
-local function collectUnderground()
-    enableFly()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
-    if not root then return end
-    for i = 3, 4 do
-        root.CFrame = CFrame.new(collectCoords[i])
-        reEnableMovement()
-        task.wait(0.05)
-        root.CFrame = root.CFrame + Vector3.new(0, -3, 0)
-        task.wait(0.1)
-        root.CFrame = root.CFrame + Vector3.new(0, 6, 0)
-        task.wait(0.5)
-    end
-end
-
 LocalPlayer.CharacterAdded:Connect(function(char)
     task.wait(1)
     local hum = char:WaitForChild("Humanoid", 5)
@@ -76,28 +55,11 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     end
 end)
 
-local Window = Fluent:CreateWindow({
-    Title = "Voice Ban Bypasser",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(580,460),
-    Acrylic = false,
-    Theme = "Dark",
-    MinimizeKey = Enum.KeyCode.LeftControl
-})
-
-local Tabs = {
-    Player = Window:AddTab({Title="Player", Icon="user"}),
-    Chams = Window:AddTab({Title="ESP", Icon="eye"}),
-    Voice = Window:AddTab({Title="Voice", Icon="mic"}),
-    Teleport = Window:AddTab({Title="Teleport", Icon="map"}),
-    Spectate = Window:AddTab({Title="Spectate", Icon="camera"}),
-    Info = Window:AddTab({Title="Info", Icon="heart"}),
-    Settings = Window:AddTab({Title="Settings", Icon="settings"})
-}
-
 local currentSpeed = 16
 local flySpeed = 50
-local flyBodyVelocity, flyBodyGyro, flyConnection
+local flyBodyVelocity
+local flyBodyGyro
+local flyConnection
 
 local function getRootPart(char)
     local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
@@ -163,319 +125,327 @@ local function disableNoclip()
     if noclipConn then noclipConn:Disconnect() noclipConn=nil end
 end
 
-local function TeleportToPlayer(plr)
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local root = getRootPart(char)
-    local tgt = getRootPart(plr.Character or plr.CharacterAdded:Wait())
-    if root and tgt then
-        root.CFrame = tgt.CFrame
-        reEnableMovement()
-    end
-end
+Tabs.Player:CreateParagraph({Title="Player Controls", Content=" "})
 
-local function SpectatePlayer(plr)
-    local char = plr.Character or plr.CharacterAdded:Wait()
-    local hum = char:FindFirstChild("Humanoid")
-    if hum then
-        Workspace.CurrentCamera.CameraSubject = hum
-        Workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+local sliderSpeed = Tabs.Player:CreateSlider({
+    Name = "Walk Speed",
+    Range = {0,150},
+    Increment = 1,
+    Suffix = "Speed",
+    CurrentValue = 16,
+    Flag = "WalkSpeed",
+    Callback = function(v)
+        setWalkSpeed(v)
     end
-end
+})
 
-local function StopSpectating()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local hum = char:FindFirstChild("Humanoid")
-    if hum then
-        Workspace.CurrentCamera.CameraSubject = hum
-        Workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
-        reEnableMovement()
+local toggleFly = Tabs.Player:CreateToggle({
+    Name = "Fly",
+    CurrentValue = false,
+    Flag = "Fly",
+    Callback = function(state)
+        if state then enableFly() else disableFly() end
     end
-end
+})
 
-do
-    local sec = Tabs.Player:AddSection("Player Controls")
-    local SpeedSlider = sec:AddSlider("SpeedSlider",{Title="Walk Speed",Default=16,Min=0,Max=150,Rounding=0})
-    SpeedSlider:OnChanged(function(v) setWalkSpeed(v) end)
-    sec:AddToggle("FlyToggle",{Title="Fly",Default=false}):OnChanged(function(s) if s then enableFly() else disableFly() end end)
-    sec:AddSlider("FlySpeedSlider",{Title="Fly Speed",Default=50,Min=0,Max=300,Rounding=0}):OnChanged(function(v) flySpeed=v end)
-    sec:AddToggle("NoclipToggle",{Title="Noclip",Default=false}):OnChanged(function(s) if s then enableNoclip() else disableNoclip() end end)
-    sec:AddToggle("AutoCollectToggle",{Title="Auto Collect Rings",Default=false}):OnChanged(function(s)
-        autoCollectActive = s
-        if s then
-            autoCollectTask = task.spawn(function()
-                while autoCollectActive do
-                    autoCollectMoney()
-                    task.wait(1)
-                end
+local sliderFly = Tabs.Player:CreateSlider({
+    Name = "Fly Speed",
+    Range = {0,300},
+    Increment = 1,
+    Suffix = "Speed",
+    CurrentValue = 50,
+    Flag = "FlySpeed",
+    Callback = function(v)
+        flySpeed = v
+    end
+})
+
+local toggleNoclip = Tabs.Player:CreateToggle({
+    Name = "Noclip",
+    CurrentValue = false,
+    Flag = "Noclip",
+    Callback = function(state)
+        if state then enableNoclip() else disableNoclip() end
+    end
+})
+
+local antiAfkConn
+local toggleAntiAFK = Tabs.Player:CreateToggle({
+    Name = "Anti AFK",
+    CurrentValue = false,
+    Flag = "AntiAFK",
+    Callback = function(state)
+        if state and not antiAfkConn then
+            antiAfkConn = LocalPlayer.Idled:Connect(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
             end)
-        else
-            if autoCollectTask then task.cancel(autoCollectTask) end
-            if not undergroundActive then disableFly() end
+        elseif not state and antiAfkConn then
+            antiAfkConn:Disconnect()
+            antiAfkConn = nil
         end
-    end)
-    sec:AddToggle("AutoCollectUndergroundToggle",{Title="Collect Underground Only",Default=false}):OnChanged(function(s)
-        undergroundActive = s
-        if s then
-            undergroundTask = task.spawn(function()
-                while undergroundActive do
-                    collectUnderground()
-                    task.wait(1)
-                end
-            end)
-        else
-            if undergroundTask then task.cancel(undergroundTask) end
-            if not autoCollectActive then disableFly() end
-        end
-    end)
-    Tabs.Player:AddSection("Anti AFK"):AddToggle("AntiAFKToggle",{Title="Anti AFK",Default=false}):OnChanged(function(s)
-        if s then
-            LocalPlayer.Idled:Connect(function()
-                game:GetService("VirtualUser"):CaptureController()
-                game:GetService("VirtualUser"):ClickButton2(Vector2.new())
-            end)
-        end
-    end)
+    end
+})
+
+local chamsActive = false
+local chamsThroughWalls = true
+local useTeamColors = false
+local teamFilter = "All"
+local chamsColor = Color3.new(1,1,1)
+local teamFriendColor = Color3.fromRGB(0,255,0)
+local teamEnemyColor = Color3.fromRGB(255,0,0)
+local chamsTask
+local ChamsPerPlayer = {}
+local CharAddedConns = {}
+local PlayerAddedConn
+local PlayerRemovingConn
+
+local function getTeamRelation(p)
+    local lt = LocalPlayer.Team
+    local pt = p.Team
+    if not lt or not pt then return "All" end
+    if lt == pt then return "Friend" else return "Enemy" end
 end
 
-do
-    local chamsActive = false
-    local chamsThroughWalls = true
-    local useTeamColors = false
-    local teamFilter = "All"
-    local chamsColor = Color3.new(1,1,1)
-    local teamFriendColor = Color3.fromRGB(0,255,0)
-    local teamEnemyColor = Color3.fromRGB(255,0,0)
-    local chamsTask
-    local ChamsPerPlayer = {}
-    local CharAddedConns = {}
-    local PlayerAddedConn, PlayerRemovingConn
-    local function getTeamRelation(p)
-        local lt = LocalPlayer.Team
-        local pt = p.Team
-        if not lt or not pt then return "All" end
-        if lt == pt then return "Friend" else return "Enemy" end
-    end
-    local function resolveChamColorFor(p)
-        if useTeamColors then
-            local rel = getTeamRelation(p)
-            if rel == "Friend" then return teamFriendColor else return teamEnemyColor end
-        end
-        return chamsColor
-    end
-    local function filterPass(p)
-        if p == LocalPlayer then return false end
-        if teamFilter == "All" then return true end
+local function resolveChamColorFor(p)
+    if useTeamColors then
         local rel = getTeamRelation(p)
-        if teamFilter == "Enemies" then return rel ~= "Friend" end
-        if teamFilter == "Teammates" then return rel == "Friend" end
-        return true
+        if rel == "Friend" then return teamFriendColor else return teamEnemyColor end
     end
-    local function removeChamsFor(player)
-        if ChamsPerPlayer[player] and ChamsPerPlayer[player].hl then
-            ChamsPerPlayer[player].hl:Destroy()
-        end
-        ChamsPerPlayer[player] = nil
-        if CharAddedConns[player] then
-            for _,c in ipairs(CharAddedConns[player]) do c:Disconnect() end
-            CharAddedConns[player] = nil
+    return chamsColor
+end
+
+local function filterPass(p)
+    if p == LocalPlayer then return false end
+    if teamFilter == "All" then return true end
+    local rel = getTeamRelation(p)
+    if teamFilter == "Enemies" then return rel ~= "Friend" end
+    if teamFilter == "Teammates" then return rel == "Friend" end
+    return true
+end
+
+local function removeChamsFor(player)
+    if ChamsPerPlayer[player] and ChamsPerPlayer[player].hl then
+        ChamsPerPlayer[player].hl:Destroy()
+    end
+    ChamsPerPlayer[player] = nil
+    if CharAddedConns[player] then
+        for _,c in ipairs(CharAddedConns[player]) do c:Disconnect() end
+        CharAddedConns[player] = nil
+    end
+end
+
+local function attachHighlightToCharacter(player, character)
+    if not character or not character:IsDescendantOf(game) then return end
+    if not filterPass(player) then return end
+    local hl = character:FindFirstChild("ChamHighlight")
+    if not hl then
+        hl = Instance.new("Highlight")
+        hl.Name = "ChamHighlight"
+        hl.Adornee = character
+        hl.DepthMode = chamsThroughWalls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+        hl.FillTransparency = 0.5
+        hl.OutlineTransparency = 0
+        hl.Parent = character
+    end
+    local color = resolveChamColorFor(player)
+    hl.FillColor = color
+    hl.OutlineColor = color
+    ChamsPerPlayer[player] = ChamsPerPlayer[player] or {}
+    ChamsPerPlayer[player].hl = hl
+end
+
+local function trackPlayer(player)
+    if player == LocalPlayer then return end
+    local a = player.Character or player.CharacterAdded:Wait()
+    attachHighlightToCharacter(player, a)
+    CharAddedConns[player] = CharAddedConns[player] or {}
+    table.insert(CharAddedConns[player], player.CharacterAdded:Connect(function(nc)
+        task.wait(0.15)
+        attachHighlightToCharacter(player, nc)
+    end))
+    table.insert(CharAddedConns[player], player.CharacterRemoving:Connect(function()
+        removeChamsFor(player)
+    end))
+end
+
+local function enableChams()
+    if chamsTask then return end
+    for _,p in ipairs(Players:GetPlayers()) do
+        if filterPass(p) then
+            task.spawn(trackPlayer, p)
         end
     end
-    local function attachHighlightToCharacter(player, character)
-        if not character or not character:IsDescendantOf(game) then return end
-        if not filterPass(player) then return end
-        local hl = character:FindFirstChild("ChamHighlight")
-        if not hl then
-            hl = Instance.new("Highlight")
-            hl.Name = "ChamHighlight"
-            hl.Adornee = character
-            hl.DepthMode = chamsThroughWalls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
-            hl.FillTransparency = 0.5
-            hl.OutlineTransparency = 0
-            hl.Parent = character
+    PlayerAddedConn = Players.PlayerAdded:Connect(function(p)
+        if filterPass(p) then
+            task.spawn(trackPlayer, p)
         end
-        local color = resolveChamColorFor(player)
-        hl.FillColor = color
-        hl.OutlineColor = color
-        ChamsPerPlayer[player] = ChamsPerPlayer[player] or {}
-        ChamsPerPlayer[player].hl = hl
-    end
-    local function trackPlayer(player)
-        if player == LocalPlayer then return end
-        local a = player.Character or player.CharacterAdded:Wait()
-        attachHighlightToCharacter(player, a)
-        CharAddedConns[player] = CharAddedConns[player] or {}
-        table.insert(CharAddedConns[player], player.CharacterAdded:Connect(function(nc)
-            task.wait(0.15)
-            attachHighlightToCharacter(player, nc)
-        end))
-        table.insert(CharAddedConns[player], player.CharacterRemoving:Connect(function()
-            removeChamsFor(player)
-        end))
-    end
-    local function enableChams()
-        if chamsTask then return end
-        for _,p in ipairs(Players:GetPlayers()) do
-            if filterPass(p) then
-                task.spawn(trackPlayer, p)
-            end
-        end
-        PlayerAddedConn = Players.PlayerAdded:Connect(function(p)
-            if filterPass(p) then
-                task.spawn(trackPlayer, p)
-            end
-        end)
-        PlayerRemovingConn = Players.PlayerRemoving:Connect(function(p)
-            removeChamsFor(p)
-        end)
-        chamsTask = task.spawn(function()
-            while chamsActive do
-                for p, info in pairs(ChamsPerPlayer) do
-                    if p and p.Character and info.hl and info.hl.Parent then
-                        local desired = resolveChamColorFor(p)
-                        info.hl.FillColor = desired
-                        info.hl.OutlineColor = desired
-                        info.hl.DepthMode = chamsThroughWalls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
-                    end
+    end)
+    PlayerRemovingConn = Players.PlayerRemoving:Connect(function(p)
+        removeChamsFor(p)
+    end)
+    chamsTask = task.spawn(function()
+        while chamsActive do
+            for p, info in pairs(ChamsPerPlayer) do
+                if p and p.Character and info.hl and info.hl.Parent then
+                    local desired = resolveChamColorFor(p)
+                    info.hl.FillColor = desired
+                    info.hl.OutlineColor = desired
+                    info.hl.DepthMode = chamsThroughWalls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
                 end
-                task.wait(0.25)
             end
-        end)
-    end
-    local function disableChams()
-        if chamsTask then task.cancel(chamsTask) chamsTask=nil end
-        if PlayerAddedConn then PlayerAddedConn:Disconnect() PlayerAddedConn=nil end
-        if PlayerRemovingConn then PlayerRemovingConn:Disconnect() PlayerRemovingConn=nil end
-        for p,_ in pairs(ChamsPerPlayer) do removeChamsFor(p) end
-    end
-
-    local SkeletonConnections = {
-        {"Head","UpperTorso"},{"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},
-        {"LeftLowerArm","LeftHand"},{"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},
-        {"RightLowerArm","RightHand"},{"UpperTorso","LowerTorso"},{"LowerTorso","LeftUpperLeg"},
-        {"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},{"LowerTorso","RightUpperLeg"},
-        {"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"}
-    }
-    local skeletonESPEnabled = false
-    local skeletonESPColor = Color3.new(1,0,0)
-    local SkeletonESPs = {}
-
-    local function CreateSkeletonForPlayer(player)
-        local drawings = {}
-        for i = 1, #SkeletonConnections do
-            local line = Drawing.new("Line")
-            line.Visible = true
-            line.Transparency = 1
-            line.Color = skeletonESPColor
-            line.Thickness = 2
-            drawings[i] = line
+            task.wait(0.25)
         end
-        SkeletonESPs[player] = drawings
-    end
+    end)
+end
 
-    local function UpdateSkeletonESP(player)
-        if not SkeletonESPs[player] then CreateSkeletonForPlayer(player) end
-        local drawings = SkeletonESPs[player]
-        local char = player.Character
-        if char then
-            for i, conn in ipairs(SkeletonConnections) do
-                local partA = char:FindFirstChild(conn[1])
-                local partB = char:FindFirstChild(conn[2])
-                if partA and partB then
-                    local a,onA = Workspace.CurrentCamera:WorldToViewportPoint(partA.Position)
-                    local b,onB = Workspace.CurrentCamera:WorldToViewportPoint(partB.Position)
-                    if onA and onB then
-                        local line = drawings[i]
-                        line.Visible = true
-                        line.From = Vector2.new(a.X,a.Y)
-                        line.To = Vector2.new(b.X,b.Y)
-                        line.Color = skeletonESPColor
-                    else
-                        drawings[i].Visible = false
-                    end
+local function disableChams()
+    if chamsTask then task.cancel(chamsTask) chamsTask=nil end
+    if PlayerAddedConn then PlayerAddedConn:Disconnect() PlayerAddedConn=nil end
+    if PlayerRemovingConn then PlayerRemovingConn:Disconnect() PlayerRemovingConn=nil end
+    for p,_ in pairs(ChamsPerPlayer) do removeChamsFor(p) end
+end
+
+local SkeletonConnections = {
+    {"Head","UpperTorso"},{"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},
+    {"LeftLowerArm","LeftHand"},{"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},
+    {"RightLowerArm","RightHand"},{"UpperTorso","LowerTorso"},{"LowerTorso","LeftUpperLeg"},
+    {"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},{"LowerTorso","RightUpperLeg"},
+    {"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"}
+}
+local skeletonESPEnabled = false
+local skeletonESPColor = Color3.new(1,0,0)
+local SkeletonESPs = {}
+
+local function CreateSkeletonForPlayer(player)
+    local drawings = {}
+    for i = 1, #SkeletonConnections do
+        local line = Drawing.new("Line")
+        line.Visible = true
+        line.Transparency = 1
+        line.Color = skeletonESPColor
+        line.Thickness = 2
+        drawings[i] = line
+    end
+    SkeletonESPs[player] = drawings
+end
+
+local function UpdateSkeletonESP(player)
+    if not SkeletonESPs[player] then CreateSkeletonForPlayer(player) end
+    local drawings = SkeletonESPs[player]
+    local char = player.Character
+    if char then
+        for i, conn in ipairs(SkeletonConnections) do
+            local partA = char:FindFirstChild(conn[1])
+            local partB = char:FindFirstChild(conn[2])
+            if partA and partB then
+                local a,onA = Workspace.CurrentCamera:WorldToViewportPoint(partA.Position)
+                local b,onB = Workspace.CurrentCamera:WorldToViewportPoint(partB.Position)
+                if onA and onB then
+                    local line = drawings[i]
+                    line.Visible = true
+                    line.From = Vector2.new(a.X,a.Y)
+                    line.To = Vector2.new(b.X,b.Y)
+                    line.Color = skeletonESPColor
                 else
                     drawings[i].Visible = false
                 end
+            else
+                drawings[i].Visible = false
             end
         end
     end
+end
 
-    local NametagsActive = false
-    local nametagTask
+local NametagsActive = false
+local nametagTask
 
-    local function CreateNametag(p)
-        local bill = Instance.new("BillboardGui")
-        bill.Name = "Nametag"
-        bill.Size = UDim2.new(0,50,0,50)
-        bill.StudsOffset = Vector3.new(0,2,0)
-        bill.AlwaysOnTop = true
-        local frame = Instance.new("Frame", bill)
-        frame.Size = UDim2.new(1,0,1,0)
-        frame.BackgroundTransparency = 1
-        local lbl = Instance.new("TextLabel", frame)
-        lbl.Size = UDim2.new(1,0,1,0)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = p.Name
-        lbl.TextScaled = false
-        lbl.TextSize = 14
-        lbl.Font = Enum.Font.GothamBold
-        lbl.TextColor3 = chamsColor
-        lbl.TextStrokeTransparency = 0.3
-        return bill
-    end
+local function CreateNametag(p)
+    local bill = Instance.new("BillboardGui")
+    bill.Name = "Nametag"
+    bill.Size = UDim2.new(0,50,0,50)
+    bill.StudsOffset = Vector3.new(0,2,0)
+    bill.AlwaysOnTop = true
+    local frame = Instance.new("Frame", bill)
+    frame.Size = UDim2.new(1,0,1,0)
+    frame.BackgroundTransparency = 1
+    local lbl = Instance.new("TextLabel", frame)
+    lbl.Size = UDim2.new(1,0,1,0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = p.Name
+    lbl.TextScaled = false
+    lbl.TextSize = 14
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextColor3 = chamsColor
+    lbl.TextStrokeTransparency = 0.3
+    return bill
+end
 
-    local function UpdateNametags()
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p~=LocalPlayer and filterPass(p) and p.Character and p.Character:FindFirstChild("Head") then
-                local head = p.Character.Head
-                if not head:FindFirstChild("Nametag") then
-                    local tag = CreateNametag(p)
-                    tag.Parent = head
-                else
-                    local tag = head:FindFirstChild("Nametag")
-                    local lbl = tag and tag:FindFirstChildWhichIsA("TextLabel", true)
-                    if lbl then
-                        local color = resolveChamColorFor(p)
-                        lbl.TextColor3 = color
-                    end
+local function UpdateNametags()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p~=LocalPlayer and filterPass(p) and p.Character and p.Character:FindFirstChild("Head") then
+            local head = p.Character.Head
+            if not head:FindFirstChild("Nametag") then
+                local tag = CreateNametag(p)
+                tag.Parent = head
+            else
+                local tag = head:FindFirstChild("Nametag")
+                local lbl = tag and tag:FindFirstChildWhichIsA("TextLabel", true)
+                if lbl then
+                    local color = resolveChamColorFor(p)
+                    lbl.TextColor3 = color
                 end
             end
         end
     end
+end
 
-    local function RemoveNametags()
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p.Character and p.Character:FindFirstChild("Head") then
-                local tag = p.Character.Head:FindFirstChild("Nametag")
-                if tag then tag:Destroy() end
-            end
+local function RemoveNametags()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character and p.Character:FindFirstChild("Head") then
+            local tag = p.Character.Head:FindFirstChild("Nametag")
+            if tag then tag:Destroy() end
         end
     end
+end
 
-    local sec = Tabs.Chams:AddSection("ESP / Chams / Nametags")
-    local ESPMasterToggle = sec:AddToggle("ESPMaster",{Title="ESP Master",Default=false})
-    local ChamsToggle = sec:AddToggle("ChamsToggle",{Title="Chams",Default=false})
-    local ChamsColorPicker = sec:AddColorpicker("ChamsColor",{Title="Chams Color",Default=Color3.new(1,1,1)})
-    local ThroughWallsToggle = sec:AddToggle("ThroughWalls",{Title="Through Walls",Default=true})
-    local TeamFilterDropdown = sec:AddDropdown("TeamFilter",{Title="Team Filter",Values={"All","Enemies","Teammates"},Default="All"})
-    local UseTeamColorsToggle = sec:AddToggle("UseTeamColors",{Title="Use Team Colors",Default=false})
-    local FriendColorPicker = sec:AddColorpicker("FriendColor",{Title="Friend Color",Default=teamFriendColor})
-    local EnemyColorPicker = sec:AddColorpicker("EnemyColor",{Title="Enemy Color",Default=teamEnemyColor})
-    local SkeletonToggle = sec:AddToggle("SkeletonESPToggle",{Title="Skeleton ESP",Default=false})
-    local SkeletonColorPicker = sec:AddColorpicker("SkeletonESPColor",{Title="Skeleton Color",Default=Color3.new(1,0,0)})
-    local NametagsToggle = sec:AddToggle("NametagsToggle",{Title="Nametags",Default=false})
+Tabs.ESP:CreateParagraph({Title="ESP / Chams / Nametags", Content=" "})
 
-    ChamsToggle:OnChanged(function(s)
+local ChamsToggle = Tabs.ESP:CreateToggle({
+    Name = "Chams",
+    CurrentValue = false,
+    Flag = "Chams",
+    Callback = function(s)
         chamsActive = s
         if s then enableChams() else disableChams() end
-    end)
-    ChamsColorPicker:OnChanged(function(c)
+    end
+})
+
+local ChamsColorPicker = Tabs.ESP:CreateColorPicker({
+    Name = "Chams Color",
+    Color = Color3.new(1,1,1),
+    Flag = "ChamsColor",
+    Callback = function(c)
         chamsColor = c
-    end)
-    ThroughWallsToggle:OnChanged(function(s)
+    end
+})
+
+local ThroughWallsToggle = Tabs.ESP:CreateToggle({
+    Name = "Through Walls",
+    CurrentValue = true,
+    Flag = "ThroughWalls",
+    Callback = function(s)
         chamsThroughWalls = s
-    end)
-    TeamFilterDropdown:OnChanged(function(v)
-        teamFilter = v
+    end
+})
+
+local TeamFilterDropdown = Tabs.ESP:CreateDropdown({
+    Name = "Team Filter",
+    Options = {"All","Enemies","Teammates"},
+    CurrentOption = "All",
+    Flag = "TeamFilter",
+    Callback = function(v)
+        teamFilter = typeof(v)=="table" and v[1] or v
         if chamsActive then
             disableChams()
             enableChams()
@@ -484,18 +454,41 @@ do
             RemoveNametags()
             UpdateNametags()
         end
-    end)
-    UseTeamColorsToggle:OnChanged(function(s)
-        useTeamColors = s
-    end)
-    FriendColorPicker:OnChanged(function(c)
-        teamFriendColor = c
-    end)
-    EnemyColorPicker:OnChanged(function(c)
-        teamEnemyColor = c
-    end)
+    end
+})
 
-    SkeletonToggle:OnChanged(function(s)
+local UseTeamColorsToggle = Tabs.ESP:CreateToggle({
+    Name = "Use Team Colors",
+    CurrentValue = false,
+    Flag = "UseTeamColors",
+    Callback = function(s)
+        useTeamColors = s
+    end
+})
+
+local FriendColorPicker = Tabs.ESP:CreateColorPicker({
+    Name = "Friend Color",
+    Color = teamFriendColor,
+    Flag = "FriendColor",
+    Callback = function(c)
+        teamFriendColor = c
+    end
+})
+
+local EnemyColorPicker = Tabs.ESP:CreateColorPicker({
+    Name = "Enemy Color",
+    Color = teamEnemyColor,
+    Flag = "EnemyColor",
+    Callback = function(c)
+        teamEnemyColor = c
+    end
+})
+
+local SkeletonToggle = Tabs.ESP:CreateToggle({
+    Name = "Skeleton ESP",
+    CurrentValue = false,
+    Flag = "SkeletonESP",
+    Callback = function(s)
         skeletonESPEnabled = s
         if not s then
             for _, lines in pairs(SkeletonESPs) do
@@ -503,22 +496,23 @@ do
             end
             SkeletonESPs = {}
         end
-    end)
-    SkeletonColorPicker:OnChanged(function(c)
+    end
+})
+
+local SkeletonColorPicker = Tabs.ESP:CreateColorPicker({
+    Name = "Skeleton Color",
+    Color = Color3.new(1,0,0),
+    Flag = "SkeletonColor",
+    Callback = function(c)
         skeletonESPColor = c
-    end)
+    end
+})
 
-    RunService.RenderStepped:Connect(function()
-        if skeletonESPEnabled then
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p~=LocalPlayer and filterPass(p) and p.Character then
-                    UpdateSkeletonESP(p)
-                end
-            end
-        end
-    end)
-
-    NametagsToggle:OnChanged(function(s)
+local NametagsToggle = Tabs.ESP:CreateToggle({
+    Name = "Nametags",
+    CurrentValue = false,
+    Flag = "Nametags",
+    Callback = function(s)
         NametagsActive = s
         if s then
             nametagTask = task.spawn(function()
@@ -531,58 +525,41 @@ do
             if nametagTask then task.cancel(nametagTask) end
             RemoveNametags()
         end
-    end)
-
-    local espHotkey = Enum.KeyCode.K
-    local hotkeyConn
-    local function setESPMaster(state)
-        if ESPMasterToggle and ESPMasterToggle.SetValue then ESPMasterToggle:SetValue(state) end
-        if ChamsToggle and ChamsToggle.SetValue then ChamsToggle:SetValue(state) else chamsActive = state if state then enableChams() else disableChams() end end
-        if SkeletonToggle and SkeletonToggle.SetValue then SkeletonToggle:SetValue(state) else skeletonESPEnabled = state end
-        if NametagsToggle and NametagsToggle.SetValue then NametagsToggle:SetValue(state) else NametagsActive = state end
     end
-    hotkeyConn = UserInputService.InputBegan:Connect(function(input,gp)
-        if gp then return end
-        if input.KeyCode == espHotkey then
-            local anyOn = chamsActive or skeletonESPEnabled or NametagsActive
-            setESPMaster(not anyOn)
-        end
-    end)
+})
 
-    local setKeyBtn = Tabs.Settings:AddSection("ESP Hotkey"):AddButton({Title="Change ESP Hotkey",Callback=function()
-        local listening = true
-        local tmpConn
-        tmpConn = UserInputService.InputBegan:Connect(function(inp, gp)
-            if gp then return end
-            if inp.KeyCode ~= Enum.KeyCode.Unknown then
-                espHotkey = inp.KeyCode
-                if tmpConn then tmpConn:Disconnect() end
-                listening = false
+RunService.RenderStepped:Connect(function()
+    if skeletonESPEnabled then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p~=LocalPlayer and filterPass(p) and p.Character then
+                UpdateSkeletonESP(p)
             end
-        end)
-        task.spawn(function()
-            task.wait(8)
-            if listening and tmpConn then tmpConn:Disconnect() end
-        end)
-    end})
-    Tabs.Settings:AddSection("ESP Hotkey"):AddParagraph({Title="Current ESP Hotkey",Content="Press K by default. Use the button to change."})
-end
+        end
+    end
+end)
 
-do
-    local sec = Tabs.Voice:AddSection("Voice Chat")
-    sec:AddButton({Title="Bypass Voiceban",Callback=function()
+Tabs.Voice:CreateParagraph({Title="Voice Chat", Content=" "})
+
+Tabs.Voice:CreateButton({
+    Name = "Bypass Voice Ban",
+    Callback = function()
         if VoiceChatService and VoiceChatService.joinVoice then
-            local ok,err = pcall(function() VoiceChatService:joinVoice() end)
-            if not ok then warn("Voice join failed: "..tostring(err)) end
+            pcall(function() VoiceChatService:joinVoice() end)
             reEnableMovement()
         end
-    end})
-    local auto = false
-    sec:AddToggle("AutoVoiceJoin",{Title="Auto Join",Default=false}):OnChanged(function(s)
-        auto = s
+    end
+})
+
+local autoVoice = false
+Tabs.Voice:CreateToggle({
+    Name = "Auto Join",
+    CurrentValue = false,
+    Flag = "AutoVoiceJoin",
+    Callback = function(s)
+        autoVoice = s
         if s then
             task.spawn(function()
-                while auto do
+                while autoVoice do
                     if not pcall(function() return VoiceChatService.Running end) then
                         pcall(function() VoiceChatService:joinVoice() end)
                     end
@@ -591,60 +568,18 @@ do
                 end
             end)
         end
-    end)
-end
-
-do
-    local sec = Tabs.Teleport:AddSection("Teleport Players")
-    local buttons = {}
-    for _,p in ipairs(Players:GetPlayers()) do
-        if p~=LocalPlayer then
-            buttons[p.UserId] = sec:AddButton({Title = p.Name,Callback = function() TeleportToPlayer(p) end})
-        end
     end
-    Players.PlayerAdded:Connect(function(p)
-        if p~=LocalPlayer then
-            buttons[p.UserId] = sec:AddButton({Title = p.Name,Callback = function() TeleportToPlayer(p) end})
-        end
-    end)
-    Players.PlayerRemoving:Connect(function(p)
-        if buttons[p.UserId] then buttons[p.UserId]:Remove(); buttons[p.UserId]=nil end
-    end)
-end
-
-do
-    local sec = Tabs.Spectate:AddSection("Spectate Players")
-    sec:AddButton({Title="Stop Spectate",Callback=StopSpectating})
-    local buttons = {}
-    for _,p in ipairs(Players:GetPlayers()) do
-        if p~=LocalPlayer then
-            buttons[p.UserId] = sec:AddButton({Title=p.Name,Callback=function() SpectatePlayer(p) end})
-        end
-    end
-    Players.PlayerAdded:Connect(function(p)
-        if p~=LocalPlayer then
-            buttons[p.UserId] = sec:AddButton({Title=p.Name,Callback=function() SpectatePlayer(p) end})
-        end
-    end)
-    Players.PlayerRemoving:Connect(function(p)
-        if buttons[p.UserId] then buttons[p.UserId]:Remove(); buttons[p.UserId]=nil end
-    end)
-end
-
-Tabs.Info:AddSection("Info"):AddParagraph({
-    Title="Info",
-    Content="★ Made by massivendurchfall ★\nDiscord: massivendurchfall\nhttps://discord.gg/2xDHnGg6J"
 })
 
-SaveManager:SetLibrary(Fluent)
-InterfaceManager:SetLibrary(Fluent)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({})
-InterfaceManager:SetFolder("FluentScriptHub_MicUp")
-SaveManager:SetFolder("FluentScriptHub_MicUp/configs")
-InterfaceManager:BuildInterfaceSection(Tabs.Settings)
-SaveManager:BuildConfigSection(Tabs.Settings)
-SaveManager:LoadAutoloadConfig()
+Tabs.Info:CreateParagraph({
+    Title = "Info",
+    Content = "★ Made by jlcfg ★\nDiscord: jlcfg\nhttps://discord.gg/2xDHnGg6J"
+})
 
-Fluent:Notify({Title="Voice Ban Bypasser",Content="Script Loaded!",Duration=5})
-Window:SelectTab(1)
+Rayfield:Notify({
+    Title = "Voice Ban Bypasser",
+    Content = "Script loaded!",
+    Duration = 5
+})
+
+Rayfield:LoadConfiguration()
