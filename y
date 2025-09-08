@@ -18,11 +18,7 @@ local Window = Rayfield:CreateWindow({
         FolderName = "RayfieldScript_MicUp",
         FileName = "Config"
     },
-    Discord = {
-        Enabled = false,
-        Invite = "",
-        RememberJoins = true
-    },
+    Discord = { Enabled = false, Invite = "", RememberJoins = true },
     KeySystem = false
 })
 
@@ -39,10 +35,7 @@ local function reEnableMovement()
         local root = char:FindFirstChild("HumanoidRootPart")
         local hum = char:FindFirstChild("Humanoid")
         if root then root.Anchored = false end
-        if hum then
-            hum.PlatformStand = false
-            hum.Sit = false
-        end
+        if hum then hum.PlatformStand = false hum.Sit = false end
     end
 end
 
@@ -55,17 +48,10 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     end
 end)
 
-local currentSpeed = 16
 local flySpeed = 50
 local flyBodyVelocity
 local flyBodyGyro
 local flyConnection
-
-local function getRootPart(char)
-    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
-    if not root then pcall(function() root = char:WaitForChild("HumanoidRootPart",5) end) end
-    return root
-end
 
 local function setWalkSpeed(speed)
     local char = LocalPlayer.Character
@@ -96,7 +82,7 @@ function enableFly()
                 if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += Workspace.CurrentCamera.CFrame.RightVector end
                 if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.new(0,1,0) end
                 if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir -= Vector3.new(0,1,0) end
-                flyBodyVelocity.Velocity = (dir.Magnitude>0 and dir.Unit*flySpeed) or Vector3.new()
+                flyBodyVelocity.Velocity = (dir.Magnitude > 0 and dir.Unit * flySpeed) or Vector3.new()
                 flyBodyGyro.CFrame = Workspace.CurrentCamera.CFrame
             end)
         end
@@ -104,9 +90,9 @@ function enableFly()
 end
 
 local function disableFly()
-    if flyBodyVelocity then flyBodyVelocity:Destroy() flyBodyVelocity=nil end
-    if flyBodyGyro then flyBodyGyro:Destroy() flyBodyGyro=nil end
-    if flyConnection then flyConnection:Disconnect() flyConnection=nil end
+    if flyBodyVelocity then flyBodyVelocity:Destroy() flyBodyVelocity = nil end
+    if flyBodyGyro then flyBodyGyro:Destroy() flyBodyGyro = nil end
+    if flyConnection then flyConnection:Disconnect() flyConnection = nil end
 end
 
 local noclipConn
@@ -122,65 +108,57 @@ local function enableNoclip()
 end
 
 local function disableNoclip()
-    if noclipConn then noclipConn:Disconnect() noclipConn=nil end
+    if noclipConn then noclipConn:Disconnect() noclipConn = nil end
 end
 
 Tabs.Player:CreateParagraph({Title="Player Controls", Content=" "})
 
-local sliderSpeed = Tabs.Player:CreateSlider({
+Tabs.Player:CreateSlider({
     Name = "Walk Speed",
     Range = {0,150},
     Increment = 1,
     Suffix = "Speed",
     CurrentValue = 16,
     Flag = "WalkSpeed",
-    Callback = function(v)
-        setWalkSpeed(v)
-    end
+    Callback = function(v) setWalkSpeed(v) end
 })
 
-local toggleFly = Tabs.Player:CreateToggle({
+Tabs.Player:CreateToggle({
     Name = "Fly",
     CurrentValue = false,
     Flag = "Fly",
-    Callback = function(state)
-        if state then enableFly() else disableFly() end
-    end
+    Callback = function(s) if s then enableFly() else disableFly() end end
 })
 
-local sliderFly = Tabs.Player:CreateSlider({
+Tabs.Player:CreateSlider({
     Name = "Fly Speed",
     Range = {0,300},
     Increment = 1,
     Suffix = "Speed",
     CurrentValue = 50,
     Flag = "FlySpeed",
-    Callback = function(v)
-        flySpeed = v
-    end
+    Callback = function(v) flySpeed = v end
 })
 
-local toggleNoclip = Tabs.Player:CreateToggle({
+Tabs.Player:CreateToggle({
     Name = "Noclip",
     CurrentValue = false,
     Flag = "Noclip",
-    Callback = function(state)
-        if state then enableNoclip() else disableNoclip() end
-    end
+    Callback = function(s) if s then enableNoclip() else disableNoclip() end end
 })
 
 local antiAfkConn
-local toggleAntiAFK = Tabs.Player:CreateToggle({
+Tabs.Player:CreateToggle({
     Name = "Anti AFK",
     CurrentValue = false,
     Flag = "AntiAFK",
-    Callback = function(state)
-        if state and not antiAfkConn then
+    Callback = function(s)
+        if s and not antiAfkConn then
             antiAfkConn = LocalPlayer.Idled:Connect(function()
                 VirtualUser:CaptureController()
                 VirtualUser:ClickButton2(Vector2.new())
             end)
-        elseif not state and antiAfkConn then
+        elseif not s and antiAfkConn then
             antiAfkConn:Disconnect()
             antiAfkConn = nil
         end
@@ -272,14 +250,10 @@ end
 local function enableChams()
     if chamsTask then return end
     for _,p in ipairs(Players:GetPlayers()) do
-        if filterPass(p) then
-            task.spawn(trackPlayer, p)
-        end
+        if filterPass(p) then task.spawn(trackPlayer, p) end
     end
     PlayerAddedConn = Players.PlayerAdded:Connect(function(p)
-        if filterPass(p) then
-            task.spawn(trackPlayer, p)
-        end
+        if filterPass(p) then task.spawn(trackPlayer, p) end
     end)
     PlayerRemovingConn = Players.PlayerRemoving:Connect(function(p)
         removeChamsFor(p)
@@ -300,9 +274,9 @@ local function enableChams()
 end
 
 local function disableChams()
-    if chamsTask then task.cancel(chamsTask) chamsTask=nil end
-    if PlayerAddedConn then PlayerAddedConn:Disconnect() PlayerAddedConn=nil end
-    if PlayerRemovingConn then PlayerRemovingConn:Disconnect() PlayerRemovingConn=nil end
+    if chamsTask then task.cancel(chamsTask) chamsTask = nil end
+    if PlayerAddedConn then PlayerAddedConn:Disconnect() PlayerAddedConn = nil end
+    if PlayerRemovingConn then PlayerRemovingConn:Disconnect() PlayerRemovingConn = nil end
     for p,_ in pairs(ChamsPerPlayer) do removeChamsFor(p) end
 end
 
@@ -383,7 +357,7 @@ end
 
 local function UpdateNametags()
     for _, p in ipairs(Players:GetPlayers()) do
-        if p~=LocalPlayer and filterPass(p) and p.Character and p.Character:FindFirstChild("Head") then
+        if p ~= LocalPlayer and filterPass(p) and p.Character and p.Character:FindFirstChild("Head") then
             local head = p.Character.Head
             if not head:FindFirstChild("Nametag") then
                 local tag = CreateNametag(p)
@@ -415,73 +389,54 @@ local ChamsToggle = Tabs.ESP:CreateToggle({
     Name = "Chams",
     CurrentValue = false,
     Flag = "Chams",
-    Callback = function(s)
-        chamsActive = s
-        if s then enableChams() else disableChams() end
-    end
+    Callback = function(s) chamsActive = s if s then enableChams() else disableChams() end end
 })
 
-local ChamsColorPicker = Tabs.ESP:CreateColorPicker({
+Tabs.ESP:CreateColorPicker({
     Name = "Chams Color",
     Color = Color3.new(1,1,1),
     Flag = "ChamsColor",
-    Callback = function(c)
-        chamsColor = c
-    end
+    Callback = function(c) chamsColor = c end
 })
 
-local ThroughWallsToggle = Tabs.ESP:CreateToggle({
+Tabs.ESP:CreateToggle({
     Name = "Through Walls",
     CurrentValue = true,
     Flag = "ThroughWalls",
-    Callback = function(s)
-        chamsThroughWalls = s
-    end
+    Callback = function(s) chamsThroughWalls = s end
 })
 
-local TeamFilterDropdown = Tabs.ESP:CreateDropdown({
+Tabs.ESP:CreateDropdown({
     Name = "Team Filter",
     Options = {"All","Enemies","Teammates"},
     CurrentOption = "All",
     Flag = "TeamFilter",
     Callback = function(v)
-        teamFilter = typeof(v)=="table" and v[1] or v
-        if chamsActive then
-            disableChams()
-            enableChams()
-        end
-        if NametagsActive then
-            RemoveNametags()
-            UpdateNametags()
-        end
+        teamFilter = typeof(v) == "table" and v[1] or v
+        if chamsActive then disableChams() enableChams() end
+        if NametagsActive then RemoveNametags() UpdateNametags() end
     end
 })
 
-local UseTeamColorsToggle = Tabs.ESP:CreateToggle({
+Tabs.ESP:CreateToggle({
     Name = "Use Team Colors",
     CurrentValue = false,
     Flag = "UseTeamColors",
-    Callback = function(s)
-        useTeamColors = s
-    end
+    Callback = function(s) useTeamColors = s end
 })
 
-local FriendColorPicker = Tabs.ESP:CreateColorPicker({
+Tabs.ESP:CreateColorPicker({
     Name = "Friend Color",
     Color = teamFriendColor,
     Flag = "FriendColor",
-    Callback = function(c)
-        teamFriendColor = c
-    end
+    Callback = function(c) teamFriendColor = c end
 })
 
-local EnemyColorPicker = Tabs.ESP:CreateColorPicker({
+Tabs.ESP:CreateColorPicker({
     Name = "Enemy Color",
     Color = teamEnemyColor,
     Flag = "EnemyColor",
-    Callback = function(c)
-        teamEnemyColor = c
-    end
+    Callback = function(c) teamEnemyColor = c end
 })
 
 local SkeletonToggle = Tabs.ESP:CreateToggle({
@@ -489,26 +444,23 @@ local SkeletonToggle = Tabs.ESP:CreateToggle({
     CurrentValue = false,
     Flag = "SkeletonESP",
     Callback = function(s)
+        local was = skeletonESPEnabled
         skeletonESPEnabled = s
-        if not s then
-            for _, lines in pairs(SkeletonESPs) do
-                for _, l in ipairs(lines) do l:Remove() end
-            end
+        if not s and was then
+            for _, lines in pairs(SkeletonESPs) do for _, l in ipairs(lines) do l:Remove() end end
             SkeletonESPs = {}
         end
     end
 })
 
-local SkeletonColorPicker = Tabs.ESP:CreateColorPicker({
+Tabs.ESP:CreateColorPicker({
     Name = "Skeleton Color",
     Color = Color3.new(1,0,0),
     Flag = "SkeletonColor",
-    Callback = function(c)
-        skeletonESPColor = c
-    end
+    Callback = function(c) skeletonESPColor = c end
 })
 
-local NametagsToggle = Tabs.ESP:CreateToggle({
+Tabs.ESP:CreateToggle({
     Name = "Nametags",
     CurrentValue = false,
     Flag = "Nametags",
@@ -531,7 +483,7 @@ local NametagsToggle = Tabs.ESP:CreateToggle({
 RunService.RenderStepped:Connect(function()
     if skeletonESPEnabled then
         for _, p in ipairs(Players:GetPlayers()) do
-            if p~=LocalPlayer and filterPass(p) and p.Character then
+            if p ~= LocalPlayer and filterPass(p) and p.Character then
                 UpdateSkeletonESP(p)
             end
         end
@@ -547,29 +499,29 @@ local function isVoiceEligible()
     return ok and enabled
 end
 
-local function joinOrRejoinVoice()
+local function refreshVoice()
     if not isVoiceEligible() then
         Rayfield:Notify({Title="Voice Chat", Content="Voice is not enabled for this account or experience.", Duration=4})
         return
     end
-    pcall(function() VoiceChatService.EnableDefaultVoice = true end)
-    local ok = pcall(function() VoiceChatService:rejoinVoice() end)
-    if not ok then
-        ok = pcall(function() VoiceChatService:joinVoice() end)
-    end
-    if ok then
+    local left = pcall(function()
+        if VoiceChatService.Leave then VoiceChatService:Leave() end
+    end)
+    task.wait(0.35)
+    local joined = pcall(function()
+        if VoiceChatService.joinVoice then VoiceChatService:joinVoice() end
+    end)
+    if joined then
         reEnableMovement()
-        Rayfield:Notify({Title="Voice Chat", Content="Joined voice.", Duration=3})
+        Rayfield:Notify({Title="Voice Chat", Content="Voice rejoined.", Duration=3})
     else
         Rayfield:Notify({Title="Voice Chat", Content="Join failed.", Duration=3})
     end
 end
 
 Tabs.Voice:CreateButton({
-    Name = "Join / Rejoin Voice",
-    Callback = function()
-        joinOrRejoinVoice()
-    end
+    Name = "Refresh Voice",
+    Callback = function() refreshVoice() end
 })
 
 Tabs.Info:CreateParagraph({
@@ -577,10 +529,5 @@ Tabs.Info:CreateParagraph({
     Content = "★ Made by jlcfg ★\nDiscord: jlcfg\nhttps://discord.gg/2xDHnGg6J"
 })
 
-Rayfield:Notify({
-    Title = "Voice Ban Bypasser",
-    Content = "Script loaded!",
-    Duration = 5
-})
-
+Rayfield:Notify({ Title = "Voice Ban Bypasser", Content = "Script loaded!", Duration = 5 })
 Rayfield:LoadConfiguration()
