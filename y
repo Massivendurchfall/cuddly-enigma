@@ -540,34 +540,35 @@ end)
 
 Tabs.Voice:CreateParagraph({Title="Voice Chat", Content=" "})
 
-Tabs.Voice:CreateButton({
-    Name = "Bypass Voice Ban",
-    Callback = function()
-        if VoiceChatService and VoiceChatService.joinVoice then
-            pcall(function() VoiceChatService:joinVoice() end)
-            reEnableMovement()
-        end
-    end
-})
+local function isVoiceEligible()
+    local ok, enabled = pcall(function()
+        return VoiceChatService:IsVoiceEnabledForUserIdAsync(LocalPlayer.UserId)
+    end)
+    return ok and enabled
+end
 
-local autoVoice = false
-Tabs.Voice:CreateToggle({
-    Name = "Auto Join",
-    CurrentValue = false,
-    Flag = "AutoVoiceJoin",
-    Callback = function(s)
-        autoVoice = s
-        if s then
-            task.spawn(function()
-                while autoVoice do
-                    if not pcall(function() return VoiceChatService.Running end) then
-                        pcall(function() VoiceChatService:joinVoice() end)
-                    end
-                    reEnableMovement()
-                    task.wait(5)
-                end
-            end)
-        end
+local function joinOrRejoinVoice()
+    if not isVoiceEligible() then
+        Rayfield:Notify({Title="Voice Chat", Content="Voice is not enabled for this account or experience.", Duration=4})
+        return
+    end
+    pcall(function() VoiceChatService.EnableDefaultVoice = true end)
+    local ok = pcall(function() VoiceChatService:rejoinVoice() end)
+    if not ok then
+        ok = pcall(function() VoiceChatService:joinVoice() end)
+    end
+    if ok then
+        reEnableMovement()
+        Rayfield:Notify({Title="Voice Chat", Content="Joined voice.", Duration=3})
+    else
+        Rayfield:Notify({Title="Voice Chat", Content="Join failed.", Duration=3})
+    end
+end
+
+Tabs.Voice:CreateButton({
+    Name = "Join / Rejoin Voice",
+    Callback = function()
+        joinOrRejoinVoice()
     end
 })
 
