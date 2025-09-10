@@ -521,7 +521,10 @@ end
 
 Tabs.Voice:CreateButton({
     Name = "Refresh Voice",
-    Callback = function() refreshVoice() end
+    Callback = function()
+        refreshVoice()
+        pcall(function() game:GetService("VoiceChatService"):joinVoice() end)
+    end
 })
 
 Tabs.Info:CreateParagraph({
