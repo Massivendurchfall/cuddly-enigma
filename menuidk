@@ -4,6 +4,7 @@ local UserInputService=game:GetService("UserInputService")
 local RunService=game:GetService("RunService")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
 local GroupService=game:GetService("GroupService")
+local HttpService=game:GetService("HttpService")
 
 local localPlayer=Players.LocalPlayer
 
@@ -33,6 +34,19 @@ local function uiStroke(p,t)local s=Instance.new("UIStroke")s.Thickness=t or 1;s
 local function uiCorner(p,r)local c=Instance.new("UICorner");c.CornerRadius=UDim.new(0,r or 12);c.Parent=p end
 local function pad(p,l,t,r,b)local x=Instance.new("UIPadding")x.PaddingLeft=UDim.new(0,l or 0)x.PaddingTop=UDim.new(0,t or 0)x.PaddingRight=UDim.new(0,r or 0)x.PaddingBottom=UDim.new(0,b or 0)x.Parent=p end
 local function pulse(b)b.AutoButtonColor=false;b.MouseButton1Down:Connect(function()TweenService:Create(b,TweenInfo.new(0.08),{Position=b.Position+UDim2.fromOffset(0,1)}):Play()end)b.MouseButton1Up:Connect(function()TweenService:Create(b,TweenInfo.new(0.08),{Position=b.Position-UDim2.fromOffset(0,1)}):Play()end)end
+
+local introGui=Instance.new("ScreenGui")introGui.Name="IntroPopup"introGui.ResetOnSpawn=false introGui.DisplayOrder=9999
+local function showIntro()
+	introGui.Parent=localPlayer:WaitForChild("PlayerGui")
+	local f=Instance.new("Frame")f.Size=UDim2.new(0,380,0,140)f.BackgroundColor3=THEME.panel f.Position=UDim2.new(0.5,-190,0.2,0)f.Parent=introGui uiCorner(f,14)uiStroke(f,1)pad(f,14,14,14,14)
+	local h=Instance.new("TextLabel")h.Size=UDim2.new(1,0,0,36)h.BackgroundColor3=THEME.header h.Text="script made by jlcfg"h.TextColor3=THEME.text h.Font=Enum.Font.GothamBold h.TextSize=20 h.Parent=f uiCorner(h,10)uiStroke(h,1)
+	local t=Instance.new("TextLabel")t.Size=UDim2.new(1,0,1,-86)t.Position=UDim2.new(0,0,0,50)t.BackgroundTransparency=1 t.Text="https://discord.gg/Ys4GjHVxRb"t.TextColor3=THEME.muted t.Font=Enum.Font.Gotham t.TextSize=18 t.TextWrapped=true t.Parent=f
+	local b=Instance.new("TextButton")b.Size=UDim2.new(0,110,0,36)b.Position=UDim2.new(1,-120,1,-46)b.BackgroundColor3=THEME.accent b.Text="OK"b.TextColor3=Color3.new(1,1,1)b.Font=Enum.Font.GothamBold b.TextSize=18 b.Parent=f uiCorner(b,10)pulse(b)
+	local function close()TweenService:Create(f,TweenInfo.new(0.18),{BackgroundTransparency=1}):Play()TweenService:Create(h,TweenInfo.new(0.18),{BackgroundTransparency=1}):Play()TweenService:Create(t,TweenInfo.new(0.18),{TextTransparency=1}):Play()TweenService:Create(b,TweenInfo.new(0.18),{TextTransparency=1}):Play()task.delay(0.2,function()introGui:Destroy()end)end
+	b.MouseButton1Click:Connect(close)
+	task.delay(3,close)
+end
+showIntro()
 
 local function stopAllAnims()local c=localPlayer.Character local h=c and c:FindFirstChildOfClass("Humanoid")if not h then return end for _,t in ipairs(h:GetPlayingAnimationTracks())do t:Stop()end end
 local function humanoid()local c=localPlayer.Character return c and c:FindFirstChildOfClass("Humanoid")end
@@ -198,6 +212,32 @@ local function getLeaderstats(player)local t,ls={},player:FindFirstChild("leader
 local function getEquipment(player)local eq,inv={},{}local c=player.Character if c then for _,x in ipairs(c:GetChildren())do if x:IsA("Tool")then table.insert(eq,x.Name)end end end local bp=player:FindFirstChildOfClass("Backpack")if bp then for _,x in ipairs(bp:GetChildren())do if x:IsA("Tool")then table.insert(inv,x.Name)end end end return(#eq>0 and table.concat(eq,", ") or "—"),(#inv>0 and table.concat(inv,", ") or "—")end
 local function updateAFK(player)local t=os.clock()local rec=AFKTracker[player] or {lastActive=t,isAFK=false}local hum=player.Character and player.Character:FindFirstChildOfClass("Humanoid")local moved=false if hum then if hum.MoveDirection and hum.MoveDirection.Magnitude>0.05 then moved=true end if hum.Sit or hum:GetState()==Enum.HumanoidStateType.Jumping then moved=true end end local lp=lastPos[player] if lp and player.Character and player.Character:FindFirstChild("HumanoidRootPart")then local d=(player.Character.HumanoidRootPart.Position-lp.pos).Magnitude if d>0.5 then moved=true end end if moved then rec.lastActive=t rec.isAFK=false else if(t-rec.lastActive)>60 then rec.isAFK=true end end AFKTracker[player]=rec return rec.isAFK,math.max(0,math.floor(t-rec.lastActive))end
 
+local function holeNamenHistorie(userId)
+	local namen,uniq,cursor={}, {}, nil
+	for i=1,4 do
+		local url=("https://users.roblox.com/v1/users/%d/username-history?limit=100"):format(userId)
+		if cursor then url=url.."&cursor="..HttpService:UrlEncode(cursor) end
+		local ok,res=pcall(function()return HttpService:GetAsync(url)end)
+		if not ok then break end
+		local data ok,res=pcall(function()data=HttpService:JSONDecode(res)end)
+		if not ok or not data or not data.data then break end
+		for _,e in ipairs(data.data)do local n=e.name or e.username if n and not uniq[n] then uniq[n]=true table.insert(namen,n) end end
+		cursor=data.nextPageCursor if not cursor then break end
+	end
+	return namen
+end
+
+local function holeAnzeigenamenHistorie(userId)
+	local namen,uniq={},{}
+	local url=("https://users.roblox.com/v1/users/%d/display-names-history?limit=100"):format(userId)
+	local ok,res=pcall(function()return HttpService:GetAsync(url)end)
+	if not ok then return namen end
+	local data ok,res=pcall(function()data=HttpService:JSONDecode(res)end)
+	if not ok or not data or not data.data then return namen end
+	for _,e in ipairs(data.data)do local n=e.displayName or e.name if n and not uniq[n] then uniq[n]=true table.insert(namen,n) end end
+	return namen
+end
+
 local screenGui=Instance.new("ScreenGui")screenGui.Name="PlayerUI"screenGui.ResetOnSpawn=false screenGui.Parent=localPlayer:WaitForChild("PlayerGui")
 local scale=Instance.new("UIScale")scale.Parent=screenGui scale.Scale=layoutMode=="mobile" and 0.95 or 1
 
@@ -318,6 +358,12 @@ local function fillMore(player)
 	row(pAccount,"Leaderstats: "..getLeaderstats(player))
 	local eq,inv=getEquipment(player) row(pAccount,"Equipped: "..eq) row(pAccount,"Backpack: "..inv)
 	row(pAccount,"Groups (Top 3): "..getGroupsSummary(player.UserId))
+	local alteUsernamen=holeNamenHistorie(player.UserId)
+	local alteAnzeigenamen=holeAnzeigenamenHistorie(player.UserId)
+	row(pAccount,"Alte Usernamen",true)
+	row(pAccount,#alteUsernamen>0 and table.concat(alteUsernamen,"  →  ") or "Keine Daten")
+	row(pAccount,"Alte Anzeigenamen",true)
+	row(pAccount,#alteAnzeigenamen>0 and table.concat(alteAnzeigenamen,"  →  ") or "Keine Daten")
 	task.defer(function()
 		pStatus.CanvasSize=UDim2.new(0,0,0,lStatus.AbsoluteContentSize.Y+10)
 		pMove.CanvasSize=UDim2.new(0,0,0,lMove.AbsoluteContentSize.Y+10)
