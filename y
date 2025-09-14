@@ -4,7 +4,6 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
-local VoiceChatService = game:GetService("VoiceChatService")
 local VirtualUser = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
@@ -25,7 +24,6 @@ local Window = Rayfield:CreateWindow({
 local Tabs = {
     Player = Window:CreateTab("Player"),
     ESP = Window:CreateTab("ESP"),
-    Voice = Window:CreateTab("Voice"),
     Info = Window:CreateTab("Info")
 }
 
@@ -490,46 +488,10 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-Tabs.Voice:CreateParagraph({Title="Voice Chat", Content=" "})
-
-local function isVoiceEligible()
-    local ok, enabled = pcall(function()
-        return VoiceChatService:IsVoiceEnabledForUserIdAsync(LocalPlayer.UserId)
-    end)
-    return ok and enabled
-end
-
-local function refreshVoice()
-    if not isVoiceEligible() then
-        Rayfield:Notify({Title="Voice Chat", Content="Voice is not enabled for this account or experience.", Duration=4})
-        return
-    end
-    local left = pcall(function()
-        if VoiceChatService.Leave then VoiceChatService:Leave() end
-    end)
-    task.wait(0.35)
-    local joined = pcall(function()
-        if VoiceChatService.joinVoice then VoiceChatService:joinVoice() end
-    end)
-    if joined then
-        reEnableMovement()
-        Rayfield:Notify({Title="Voice Chat", Content="Voice rejoined.", Duration=3})
-    else
-        Rayfield:Notify({Title="Voice Chat", Content="Join failed.", Duration=3})
-    end
-end
-
-Tabs.Voice:CreateButton({
-    Name = "Refresh Voice",
-    Callback = function()
-        game:GetService("VoiceChatService"):joinVoice()
-    end
-})
-
 Tabs.Info:CreateParagraph({
     Title = "Info",
     Content = "★ Made by jlcfg ★\nDiscord: jlcfg\nhttps://discord.gg/2xDHnGg6J"
 })
 
-Rayfield:Notify({ Title = "Voice Ban Bypasser", Content = "Script loaded!", Duration = 5 })
+Rayfield:Notify({ Title = "Voice Ban Bypasser", Content = "Script loaded! jlcfg on discord", Duration = 15 })
 Rayfield:LoadConfiguration()
