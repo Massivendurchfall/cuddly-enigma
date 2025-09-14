@@ -29,7 +29,7 @@ end
 
 local Window = Fluent:CreateWindow({
     Title = "Banana Eats Script",
-    SubTitle = "by Massivendurchfall",
+    SubTitle = "by jlcfg on discord",
     TabWidth = 160,
     Size = UDim2.fromOffset(620, 520),
     Acrylic = true,
