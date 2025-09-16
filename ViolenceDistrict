@@ -1,0 +1,470 @@
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local LP = Players.LocalPlayer
+
+local Window = Fluent:CreateWindow({
+    Title = "Violence District",
+    SubTitle = "by jlcfg",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(660, 520),
+    Acrylic = false,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+    Player = Window:AddTab({ Title = "Player", Icon = "user" }),
+    ESP = Window:AddTab({ Title = "ESP", Icon = "eye" }),
+    World = Window:AddTab({ Title = "World", Icon = "map" }),
+    Misc = Window:AddTab({ Title = "Misc", Icon = "wrench" }),
+    Visual = Window:AddTab({ Title = "Visual", Icon = "sun" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "sliders" })
+}
+
+local function firstBasePart(inst)
+    if not inst then return nil end
+    if inst:IsA("BasePart") then return inst end
+    if inst:IsA("Model") then
+        if inst.PrimaryPart and inst.PrimaryPart:IsA("BasePart") then return inst.PrimaryPart end
+        return inst:FindFirstChildWhichIsA("BasePart", true)
+    end
+    return nil
+end
+
+local function makeBillboard(text, color3)
+    local g = Instance.new("BillboardGui")
+    g.Name = "VD_Tag"
+    g.AlwaysOnTop = true
+    g.Size = UDim2.new(0, 180, 0, 34)
+    g.StudsOffset = Vector3.new(0, 3, 0)
+    local l = Instance.new("TextLabel")
+    l.Name = "Label"
+    l.BackgroundTransparency = 1
+    l.Size = UDim2.new(1, 0, 1, 0)
+    l.Font = Enum.Font.GothamBold
+    l.Text = text
+    l.TextSize = 14
+    l.TextColor3 = color3 or Color3.new(1,1,1)
+    l.TextStrokeTransparency = 0
+    l.TextStrokeColor3 = Color3.new(0,0,0)
+    l.Parent = g
+    return g
+end
+
+local function ensureBoxESP(part, name, color)
+    if not part or not part.Parent then return end
+    local esp = part:FindFirstChild(name)
+    if not esp then
+        esp = Instance.new("BoxHandleAdornment")
+        esp.Name = name
+        esp.Adornee = part
+        esp.ZIndex = 10
+        esp.AlwaysOnTop = true
+        esp.Transparency = 0.5
+        esp.Size = part.Size + Vector3.new(0.2,0.2,0.2)
+        esp.Color3 = color
+        esp.Parent = part
+    else
+        esp.Color3 = color
+        esp.Size = part.Size + Vector3.new(0.2,0.2,0.2)
+    end
+end
+
+local function clearChild(o, n)
+    if o and o.Parent and o:FindFirstChild(n) then o[n]:Destroy() end
+end
+
+local function ensureHighlight(model, fill)
+    if not model then return end
+    local hl = model:FindFirstChild("VD_HL")
+    if not hl then
+        hl = Instance.new("Highlight")
+        hl.Name = "VD_HL"
+        hl.Adornee = model
+        hl.FillTransparency = 0.5
+        hl.OutlineTransparency = 0
+        hl.Parent = model
+    end
+    hl.FillColor = fill
+    hl.OutlineColor = fill
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+end
+
+local function clearHighlight(model)
+    if model and model:FindFirstChild("VD_HL") then model.VD_HL:Destroy() end
+end
+
+local survivorColor = Color3.fromRGB(0,255,0)
+local killerColor = Color3.fromRGB(255,0,0)
+local nametagsEnabled = false
+local playerESPEnabled = false
+local playerConns = {}
+
+local function getRole(p)
+    if p.Team and p.Team.Name then
+        local n = p.Team.Name:lower()
+        if n:find("killer") then return "Killer" end
+        if n:find("survivor") then return "Survivor" end
+    end
+    return "Survivor"
+end
+
+local function applyPlayerESP(p)
+    if p == LP then return end
+    local c = p.Character
+    if not c then return end
+    local role = getRole(p)
+    local col = role == "Killer" and killerColor or survivorColor
+    if playerESPEnabled then
+        ensureHighlight(c, col)
+        local head = c:FindFirstChild("Head")
+        if nametagsEnabled and head then
+            if not head:FindFirstChild("VD_Tag") then
+                local b = makeBillboard(p.Name, col)
+                b.Parent = head
+            else
+                local l = head.VD_Tag:FindFirstChild("Label")
+                if l then l.Text = p.Name l.TextColor3 = col end
+            end
+        elseif head and head:FindFirstChild("VD_Tag") then
+            head.VD_Tag:Destroy()
+        end
+    else
+        clearHighlight(c)
+        local head = c:FindFirstChild("Head")
+        if head and head:FindFirstChild("VD_Tag") then head.VD_Tag:Destroy() end
+    end
+end
+
+local function watchPlayer(p)
+    if playerConns[p] then for _,cn in ipairs(playerConns[p]) do cn:Disconnect() end end
+    playerConns[p] = {}
+    table.insert(playerConns[p], p.CharacterAdded:Connect(function() task.wait(0.1) applyPlayerESP(p) end))
+    table.insert(playerConns[p], p:GetPropertyChangedSignal("Team"):Connect(function() applyPlayerESP(p) end))
+    if p.Character then applyPlayerESP(p) end
+end
+
+local function unwatchPlayer(p)
+    if p.Character then
+        clearHighlight(p.Character)
+        local head = p.Character:FindFirstChild("Head")
+        if head and head:FindFirstChild("VD_Tag") then head.VD_Tag:Destroy() end
+    end
+    if playerConns[p] then for _,cn in ipairs(playerConns[p]) do cn:Disconnect() end end
+    playerConns[p] = nil
+end
+
+local playerSec = Tabs.ESP:AddSection("Players")
+playerSec:AddToggle("PlayerESP", { Title = "Player ESP (Chams)", Default = false, Callback = function(s)
+    playerESPEnabled = s
+    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+end})
+playerSec:AddToggle("Nametags", { Title = "Nametags", Default = false, Callback = function(s)
+    nametagsEnabled = s
+    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+end})
+playerSec:AddColorpicker("SurvivorCol", { Title = "Survivor Color", Default = survivorColor, Callback = function(c)
+    survivorColor = c
+    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+end})
+playerSec:AddColorpicker("KillerCol", { Title = "Killer Color", Default = killerColor, Callback = function(c)
+    killerColor = c
+    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+end})
+
+for _,p in ipairs(Players:GetPlayers()) do if p ~= LP then watchPlayer(p) end end
+Players.PlayerAdded:Connect(watchPlayer)
+Players.PlayerRemoving:Connect(unwatchPlayer)
+
+local worldColors = {
+    Generator = Color3.fromRGB(0,170,255),
+    Hook = Color3.fromRGB(255,0,0),
+    Gate = Color3.fromRGB(255,225,0),
+    Window = Color3.fromRGB(255,255,255),
+    Palletwrong = Color3.fromRGB(255,140,0)
+}
+local worldEnabled = {
+    Generator = false,
+    Hook = false,
+    Gate = false,
+    Window = false,
+    Palletwrong = false
+}
+
+local validCats = {Generator=true,Hook=true,Gate=true,Window=true,Palletwrong=true}
+local worldReg = {Generator={},Hook={},Gate={},Window={},Palletwrong={}}
+local mapAdd, mapRem = {}, {}
+
+local function pickRep(model, cat)
+    if cat == "Generator" then
+        local hb = model:FindFirstChild("HitBox", true)
+        if hb and hb:IsA("BasePart") then return hb end
+    elseif cat == "Palletwrong" then
+        local a = model:FindFirstChild("HumanoidRootPart", true)
+        if a and a:IsA("BasePart") then return a end
+        local b = model:FindFirstChild("PrimaryPartPallet", true)
+        if b and b:IsA("BasePart") then return b end
+        local c = model:FindFirstChild("Primary1", true)
+        if c and c:IsA("BasePart") then return c end
+        local d = model:FindFirstChild("Primary2", true)
+        if d and d:IsA("BasePart") then return d end
+    end
+    return firstBasePart(model)
+end
+
+local function ensureWorldEntry(cat, model)
+    if worldReg[cat][model] then return end
+    local rep = pickRep(model, cat)
+    if not rep then return end
+    worldReg[cat][model] = {part = rep}
+end
+
+local function removeWorldEntry(cat, model)
+    local entry = worldReg[cat][model]
+    if not entry then return end
+    local part = entry.part
+    clearChild(part, "VD_"..cat)
+    clearChild(part, "VD_Text_"..cat)
+    worldReg[cat][model] = nil
+end
+
+local function registerFromDescendant(obj)
+    if obj:IsA("Model") and validCats[obj.Name] then
+        ensureWorldEntry(obj.Name, obj)
+        return
+    end
+    if obj:IsA("BasePart") and obj.Parent and obj.Parent:IsA("Model") and validCats[obj.Parent.Name] then
+        ensureWorldEntry(obj.Parent.Name, obj.Parent)
+    end
+end
+
+local function unregisterFromDescendant(obj)
+    if obj:IsA("Model") and validCats[obj.Name] then
+        removeWorldEntry(obj.Name, obj)
+        return
+    end
+    if obj:IsA("BasePart") and obj.Parent and obj.Parent:IsA("Model") and validCats[obj.Parent.Name] then
+        if worldReg[obj.Parent.Name][obj.Parent] and worldReg[obj.Parent.Name][obj.Parent].part == obj then
+            removeWorldEntry(obj.Parent.Name, obj.Parent)
+        end
+    end
+end
+
+local function attachRoot(root)
+    if not root or mapAdd[root] then return end
+    mapAdd[root] = root.DescendantAdded:Connect(registerFromDescendant)
+    mapRem[root] = root.DescendantRemoving:Connect(unregisterFromDescendant)
+    for _,d in ipairs(root:GetDescendants()) do registerFromDescendant(d) end
+end
+
+local function refreshRoots()
+    for _,cn in pairs(mapAdd) do if cn then cn:Disconnect() end end
+    for _,cn in pairs(mapRem) do if cn then cn:Disconnect() end end
+    mapAdd, mapRem = {}, {}
+    local r1 = Workspace:FindFirstChild("Map")
+    local r2 = Workspace:FindFirstChild("Map1")
+    if r1 then attachRoot(r1) end
+    if r2 then attachRoot(r2) end
+end
+
+refreshRoots()
+Workspace.ChildAdded:Connect(function(ch)
+    if ch.Name == "Map" or ch.Name == "Map1" then attachRoot(ch) end
+end)
+
+RunService.Heartbeat:Connect(function()
+    for cat,models in pairs(worldReg) do
+        if worldEnabled[cat] then
+            local col = worldColors[cat]
+            local tagName = "VD_"..cat
+            local textName = "VD_Text_"..cat
+            for model,entry in pairs(models) do
+                local part = entry.part
+                if model and model.Parent and part and part.Parent then
+                    if not part:IsDescendantOf(model) then
+                        entry.part = pickRep(model, cat)
+                        part = entry.part
+                    end
+                    if part then
+                        ensureBoxESP(part, tagName, col)
+                        if not part:FindFirstChild(textName) then
+                            local bb = makeBillboard(cat, col)
+                            bb.Name = textName
+                            bb.Parent = part
+                        else
+                            local lbl = part[textName]:FindFirstChild("Label")
+                            if lbl then lbl.Text = cat lbl.TextColor3 = col end
+                        end
+                    end
+                else
+                    removeWorldEntry(cat, model)
+                end
+            end
+        else
+            for _,entry in pairs(models) do
+                if entry.part then
+                    clearChild(entry.part, "VD_"..cat)
+                    clearChild(entry.part, "VD_Text_"..cat)
+                end
+            end
+        end
+    end
+end)
+
+local worldSec = Tabs.World:AddSection("Toggles")
+worldSec:AddToggle("Gen", { Title = "Generators", Default = false, Callback = function(s) worldEnabled.Generator = s end })
+worldSec:AddToggle("Hook", { Title = "Hooks", Default = false, Callback = function(s) worldEnabled.Hook = s end })
+worldSec:AddToggle("Gate", { Title = "Gates", Default = false, Callback = function(s) worldEnabled.Gate = s end })
+worldSec:AddToggle("Window", { Title = "Windows", Default = false, Callback = function(s) worldEnabled.Window = s end })
+worldSec:AddToggle("Pallet", { Title = "Pallets", Default = false, Callback = function(s) worldEnabled.Palletwrong = s end })
+
+local worldCol = Tabs.World:AddSection("Colors")
+worldCol:AddColorpicker("GenCol", { Title = "Generators", Default = worldColors.Generator, Callback = function(c) worldColors.Generator = c end })
+worldCol:AddColorpicker("HookCol", { Title = "Hooks", Default = worldColors.Hook, Callback = function(c) worldColors.Hook = c end })
+worldCol:AddColorpicker("GateCol", { Title = "Gates", Default = worldColors.Gate, Callback = function(c) worldColors.Gate = c end })
+worldCol:AddColorpicker("WinCol", { Title = "Windows", Default = worldColors.Window, Callback = function(c) worldColors.Window = c end })
+worldCol:AddColorpicker("PalCol", { Title = "Pallets", Default = worldColors.Palletwrong, Callback = function(c) worldColors.Palletwrong = c end })
+
+local noSkillConnGUI, noSkillConnChar
+local function isSkillNode(o)
+    local n = o.Name:lower()
+    return n:find("skillcheck") or n:find("skill_check") or n:find("skill") or n:find("qte")
+end
+local function purgeSkill()
+    local pg = LP:FindFirstChild("PlayerGui")
+    if pg then for _,d in ipairs(pg:GetDescendants()) do if isSkillNode(d) and d.Destroy then pcall(function() d:Destroy() end) end end end
+    local c = LP.Character
+    if c then for _,d in ipairs(c:GetDescendants()) do if isSkillNode(d) and d.Destroy then pcall(function() d:Destroy() end) end end end
+end
+
+local miscSec = Tabs.Misc:AddSection("Skillcheck")
+miscSec:AddToggle("NoSkill", { Title = "No Skillchecks (local)", Default = false, Callback = function(s)
+    if s then
+        purgeSkill()
+        if not noSkillConnGUI then
+            local pg = LP:FindFirstChild("PlayerGui")
+            if pg then noSkillConnGUI = pg.DescendantAdded:Connect(function(o) if isSkillNode(o) then pcall(function() o:Destroy() end) end end) end
+        end
+        if not noSkillConnChar then
+            noSkillConnChar = LP.CharacterAdded:Connect(function() task.wait(0.2) purgeSkill() end)
+        end
+    else
+        if noSkillConnGUI then noSkillConnGUI:Disconnect() noSkillConnGUI=nil end
+        if noSkillConnChar then noSkillConnChar:Disconnect() noSkillConnChar=nil end
+    end
+end})
+
+local initLighting = {
+    Brightness = Lighting.Brightness,
+    ClockTime = Lighting.ClockTime,
+    FogStart = Lighting.FogStart,
+    FogEnd = Lighting.FogEnd,
+    GlobalShadows = Lighting.GlobalShadows,
+    OutdoorAmbient = Lighting.OutdoorAmbient,
+    ExposureCompensation = Lighting.ExposureCompensation
+}
+
+local fullbrightEnabled = false
+local fbLoop
+
+local visSec = Tabs.Visual:AddSection("Lighting")
+visSec:AddToggle("Fullbright", { Title = "Fullbright", Default = false, Callback = function(s)
+    fullbrightEnabled = s
+    if fbLoop then task.cancel(fbLoop) fbLoop=nil end
+    if s then
+        fbLoop = task.spawn(function()
+            while fullbrightEnabled do
+                Lighting.Brightness = 2
+                Lighting.ClockTime = 14
+                Lighting.FogStart = 0
+                Lighting.FogEnd = 1e9
+                Lighting.GlobalShadows = false
+                Lighting.OutdoorAmbient = Color3.fromRGB(128,128,128)
+                Lighting.ExposureCompensation = 0
+                task.wait(0.5)
+            end
+        end)
+    else
+        for k,v in pairs(initLighting) do pcall(function() Lighting[k]=v end) end
+    end
+end})
+
+visSec:AddSlider("TimeOfDay", { Title = "Time Of Day", Min = 0, Max = 24, Default = Lighting.ClockTime, Rounding = 1, Callback = function(v) Lighting.ClockTime = v end })
+
+local currentSpeed = 16
+local speedHumanoid = nil
+local speedConnChanged, speedConnAncestry = nil, nil
+local speedBound = false
+
+local function setWalkSpeed(h, v)
+    if h and h.Parent then pcall(function() h.WalkSpeed = v end) end
+end
+
+local function bindSpeedLoop()
+    if speedBound then return end
+    speedBound = true
+    RunService:BindToRenderStep("VD_SpeedEnforcer", 300, function()
+        if not speedHumanoid or not speedHumanoid.Parent then return end
+        if speedHumanoid.WalkSpeed ~= currentSpeed then setWalkSpeed(speedHumanoid, currentSpeed) end
+    end)
+end
+
+local function unbindSpeedLoop()
+    if speedBound then
+        speedBound = false
+        pcall(function() RunService:UnbindFromRenderStep("VD_SpeedEnforcer") end)
+    end
+end
+
+local function hookHumanoid(h)
+    if speedConnChanged then speedConnChanged:Disconnect() speedConnChanged=nil end
+    if speedConnAncestry then speedConnAncestry:Disconnect() speedConnAncestry=nil end
+    speedHumanoid = h
+    setWalkSpeed(h, currentSpeed)
+    bindSpeedLoop()
+    speedConnChanged = h:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+        if h.Parent and h.WalkSpeed ~= currentSpeed then setWalkSpeed(h, currentSpeed) end
+    end)
+    speedConnAncestry = h.AncestryChanged:Connect(function(_, parent)
+        if not parent then unbindSpeedLoop() end
+    end)
+end
+
+local function onCharacterAdded(char)
+    local h = char:WaitForChild("Humanoid", 10) or char:FindFirstChildOfClass("Humanoid")
+    if h then hookHumanoid(h) end
+    char.ChildAdded:Connect(function(ch) if ch:IsA("Humanoid") then hookHumanoid(ch) end end)
+end
+
+if LP.Character then onCharacterAdded(LP.Character) end
+LP.CharacterAdded:Connect(onCharacterAdded)
+
+local playerMove = Tabs.Player:AddSection("Movement")
+playerMove:AddSlider("WalkSpeed", { Title = "Walk Speed", Min = 0, Max = 200, Default = 16, Rounding = 0, Callback = function(v)
+    currentSpeed = v
+    if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid, currentSpeed) end
+    bindSpeedLoop()
+end})
+playerMove:AddButton({ Title = "Reset Speed", Callback = function()
+    currentSpeed = 16
+    if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid, currentSpeed) end
+end})
+
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+InterfaceManager:SetFolder("VD_Suite")
+SaveManager:SetFolder("VD_Suite/config")
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+SaveManager:LoadAutoloadConfig()
+
+Fluent:Notify({ Title = "Violence District", Content = "Loaded, made by JLCFG", Duration = 8 })
+Window:SelectTab(1)
