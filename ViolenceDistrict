@@ -284,6 +284,7 @@ RunService.Heartbeat:Connect(function()
             local col = worldColors[cat]
             local tagName = "VD_"..cat
             local textName = "VD_Text_"..cat
+            local labelText = cat == "Palletwrong" and "Pallet" or cat
             for model,entry in pairs(models) do
                 local part = entry.part
                 if model and model.Parent and part and part.Parent then
@@ -294,12 +295,12 @@ RunService.Heartbeat:Connect(function()
                     if part then
                         ensureBoxESP(part, tagName, col)
                         if not part:FindFirstChild(textName) then
-                            local bb = makeBillboard(cat, col)
+                            local bb = makeBillboard(labelText, col)
                             bb.Name = textName
                             bb.Parent = part
                         else
                             local lbl = part[textName]:FindFirstChild("Label")
-                            if lbl then lbl.Text = cat lbl.TextColor3 = col end
+                            if lbl then lbl.Text = labelText lbl.TextColor3 = col end
                         end
                     end
                 else
@@ -466,5 +467,5 @@ InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
-Fluent:Notify({ Title = "Violence District", Content = "Loaded, made by JLCFG", Duration = 8 })
+Fluent:Notify({ Title = "Violence District", Content = "Loaded, made by JLCFG on Discord", Duration = 7 })
 Window:SelectTab(1)
