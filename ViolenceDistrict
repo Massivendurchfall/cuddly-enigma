@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
+local UserInputService = game:GetService("UserInputService")
 local LP = Players.LocalPlayer
 
 local Window = Fluent:CreateWindow({
@@ -27,7 +28,7 @@ local Tabs = {
     Settings = Window:AddTab({ Title = "Settings", Icon = "sliders" })
 }
 
-local function firstBasePart(inst)
+local function ersteBasePart(inst)
     if not inst then return nil end
     if inst:IsA("BasePart") then return inst end
     if inst:IsA("Model") then
@@ -37,7 +38,7 @@ local function firstBasePart(inst)
     return nil
 end
 
-local function makeBillboard(text, color3)
+local function erstelleBillboard(text, farbe)
     local g = Instance.new("BillboardGui")
     g.Name = "VD_Tag"
     g.AlwaysOnTop = true
@@ -50,14 +51,14 @@ local function makeBillboard(text, color3)
     l.Font = Enum.Font.GothamBold
     l.Text = text
     l.TextSize = 14
-    l.TextColor3 = color3 or Color3.new(1,1,1)
+    l.TextColor3 = farbe or Color3.new(1,1,1)
     l.TextStrokeTransparency = 0
     l.TextStrokeColor3 = Color3.new(0,0,0)
     l.Parent = g
     return g
 end
 
-local function ensureBoxESP(part, name, color)
+local function stelleBoxESP(part, name, farbe)
     if not part or not part.Parent then return end
     local esp = part:FindFirstChild(name)
     if not esp then
@@ -68,45 +69,45 @@ local function ensureBoxESP(part, name, color)
         esp.AlwaysOnTop = true
         esp.Transparency = 0.5
         esp.Size = part.Size + Vector3.new(0.2,0.2,0.2)
-        esp.Color3 = color
+        esp.Color3 = farbe
         esp.Parent = part
     else
-        esp.Color3 = color
+        esp.Color3 = farbe
         esp.Size = part.Size + Vector3.new(0.2,0.2,0.2)
     end
 end
 
-local function clearChild(o, n)
+local function loescheKind(o, n)
     if o and o.Parent and o:FindFirstChild(n) then o[n]:Destroy() end
 end
 
-local function ensureHighlight(model, fill)
-    if not model then return end
-    local hl = model:FindFirstChild("VD_HL")
+local function stelleHighlight(modell, fuell)
+    if not modell then return end
+    local hl = modell:FindFirstChild("VD_HL")
     if not hl then
         hl = Instance.new("Highlight")
         hl.Name = "VD_HL"
-        hl.Adornee = model
+        hl.Adornee = modell
         hl.FillTransparency = 0.5
         hl.OutlineTransparency = 0
-        hl.Parent = model
+        hl.Parent = modell
     end
-    hl.FillColor = fill
-    hl.OutlineColor = fill
+    hl.FillColor = fuell
+    hl.OutlineColor = fuell
     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 end
 
-local function clearHighlight(model)
-    if model and model:FindFirstChild("VD_HL") then model.VD_HL:Destroy() end
+local function loescheHighlight(modell)
+    if modell and modell:FindFirstChild("VD_HL") then modell.VD_HL:Destroy() end
 end
 
-local survivorColor = Color3.fromRGB(0,255,0)
-local killerColor = Color3.fromRGB(255,0,0)
-local nametagsEnabled = false
-local playerESPEnabled = false
-local playerConns = {}
+local farbeUeberlebender = Color3.fromRGB(0,255,0)
+local farbeKiller = Color3.fromRGB(255,0,0)
+local namensschilderAn = false
+local spielerESPAn = false
+local spielerVerbindungen = {}
 
-local function getRole(p)
+local function rolleVon(p)
     if p.Team and p.Team.Name then
         local n = p.Team.Name:lower()
         if n:find("killer") then return "Killer" end
@@ -115,18 +116,18 @@ local function getRole(p)
     return "Survivor"
 end
 
-local function applyPlayerESP(p)
+local function anwendeSpielerESP(p)
     if p == LP then return end
     local c = p.Character
     if not c then return end
-    local role = getRole(p)
-    local col = role == "Killer" and killerColor or survivorColor
-    if playerESPEnabled then
-        ensureHighlight(c, col)
+    local rolle = rolleVon(p)
+    local col = rolle == "Killer" and farbeKiller or farbeUeberlebender
+    if spielerESPAn then
+        stelleHighlight(c, col)
         local head = c:FindFirstChild("Head")
-        if nametagsEnabled and head then
+        if namensschilderAn and head then
             if not head:FindFirstChild("VD_Tag") then
-                local b = makeBillboard(p.Name, col)
+                local b = erstelleBillboard(p.Name, col)
                 b.Parent = head
             else
                 local l = head.VD_Tag:FindFirstChild("Label")
@@ -136,60 +137,60 @@ local function applyPlayerESP(p)
             head.VD_Tag:Destroy()
         end
     else
-        clearHighlight(c)
+        loescheHighlight(c)
         local head = c:FindFirstChild("Head")
         if head and head:FindFirstChild("VD_Tag") then head.VD_Tag:Destroy() end
     end
 end
 
-local function watchPlayer(p)
-    if playerConns[p] then for _,cn in ipairs(playerConns[p]) do cn:Disconnect() end end
-    playerConns[p] = {}
-    table.insert(playerConns[p], p.CharacterAdded:Connect(function() task.wait(0.1) applyPlayerESP(p) end))
-    table.insert(playerConns[p], p:GetPropertyChangedSignal("Team"):Connect(function() applyPlayerESP(p) end))
-    if p.Character then applyPlayerESP(p) end
+local function beobachteSpieler(p)
+    if spielerVerbindungen[p] then for _,cn in ipairs(spielerVerbindungen[p]) do cn:Disconnect() end end
+    spielerVerbindungen[p] = {}
+    table.insert(spielerVerbindungen[p], p.CharacterAdded:Connect(function() task.wait(0.1) anwendeSpielerESP(p) end))
+    table.insert(spielerVerbindungen[p], p:GetPropertyChangedSignal("Team"):Connect(function() anwendeSpielerESP(p) end))
+    if p.Character then anwendeSpielerESP(p) end
 end
 
-local function unwatchPlayer(p)
+local function entbeobachteSpieler(p)
     if p.Character then
-        clearHighlight(p.Character)
+        loescheHighlight(p.Character)
         local head = p.Character:FindFirstChild("Head")
         if head and head:FindFirstChild("VD_Tag") then head.VD_Tag:Destroy() end
     end
-    if playerConns[p] then for _,cn in ipairs(playerConns[p]) do cn:Disconnect() end end
-    playerConns[p] = nil
+    if spielerVerbindungen[p] then for _,cn in ipairs(spielerVerbindungen[p]) do cn:Disconnect() end end
+    spielerVerbindungen[p] = nil
 end
 
-local playerSec = Tabs.ESP:AddSection("Players")
-playerSec:AddToggle("PlayerESP", { Title = "Player ESP (Chams)", Default = false, Callback = function(s)
-    playerESPEnabled = s
-    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+local spielerAbschnitt = Tabs.ESP:AddSection("Players")
+spielerAbschnitt:AddToggle("PlayerESP", { Title = "Player ESP (Chams)", Default = false, Callback = function(s)
+    spielerESPAn = s
+    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then anwendeSpielerESP(pl) end end
 end})
-playerSec:AddToggle("Nametags", { Title = "Nametags", Default = false, Callback = function(s)
-    nametagsEnabled = s
-    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+spielerAbschnitt:AddToggle("Nametags", { Title = "Nametags", Default = false, Callback = function(s)
+    namensschilderAn = s
+    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then anwendeSpielerESP(pl) end end
 end})
-playerSec:AddColorpicker("SurvivorCol", { Title = "Survivor Color", Default = survivorColor, Callback = function(c)
-    survivorColor = c
-    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+spielerAbschnitt:AddColorpicker("SurvivorCol", { Title = "Survivor Color", Default = farbeUeberlebender, Callback = function(c)
+    farbeUeberlebender = c
+    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then anwendeSpielerESP(pl) end end
 end})
-playerSec:AddColorpicker("KillerCol", { Title = "Killer Color", Default = killerColor, Callback = function(c)
-    killerColor = c
-    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+spielerAbschnitt:AddColorpicker("KillerCol", { Title = "Killer Color", Default = farbeKiller, Callback = function(c)
+    farbeKiller = c
+    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then anwendeSpielerESP(pl) end end
 end})
 
-for _,p in ipairs(Players:GetPlayers()) do if p ~= LP then watchPlayer(p) end end
-Players.PlayerAdded:Connect(watchPlayer)
-Players.PlayerRemoving:Connect(unwatchPlayer)
+for _,p in ipairs(Players:GetPlayers()) do if p ~= LP then beobachteSpieler(p) end end
+Players.PlayerAdded:Connect(beobachteSpieler)
+Players.PlayerRemoving:Connect(entbeobachteSpieler)
 
-local worldColors = {
+local weltFarben = {
     Generator = Color3.fromRGB(0,170,255),
     Hook = Color3.fromRGB(255,0,0),
     Gate = Color3.fromRGB(255,225,0),
     Window = Color3.fromRGB(255,255,255),
     Palletwrong = Color3.fromRGB(255,140,0)
 }
-local worldEnabled = {
+local weltAn = {
     Generator = false,
     Hook = false,
     Gate = false,
@@ -197,105 +198,105 @@ local worldEnabled = {
     Palletwrong = false
 }
 
-local validCats = {Generator=true,Hook=true,Gate=true,Window=true,Palletwrong=true}
-local worldReg = {Generator={},Hook={},Gate={},Window={},Palletwrong={}}
+local gueltigeKats = {Generator=true,Hook=true,Gate=true,Window=true,Palletwrong=true}
+local weltReg = {Generator={},Hook={},Gate={},Window={},Palletwrong={}}
 local mapAdd, mapRem = {}, {}
 
-local function pickRep(model, cat)
-    if cat == "Generator" then
-        local hb = model:FindFirstChild("HitBox", true)
+local function pickRep(modell, kat)
+    if kat == "Generator" then
+        local hb = modell:FindFirstChild("HitBox", true)
         if hb and hb:IsA("BasePart") then return hb end
-    elseif cat == "Palletwrong" then
-        local a = model:FindFirstChild("HumanoidRootPart", true)
+    elseif kat == "Palletwrong" then
+        local a = modell:FindFirstChild("HumanoidRootPart", true)
         if a and a:IsA("BasePart") then return a end
-        local b = model:FindFirstChild("PrimaryPartPallet", true)
+        local b = modell:FindFirstChild("PrimaryPartPallet", true)
         if b and b:IsA("BasePart") then return b end
-        local c = model:FindFirstChild("Primary1", true)
+        local c = modell:FindFirstChild("Primary1", true)
         if c and c:IsA("BasePart") then return c end
-        local d = model:FindFirstChild("Primary2", true)
+        local d = modell:FindFirstChild("Primary2", true)
         if d and d:IsA("BasePart") then return d end
     end
-    return firstBasePart(model)
+    return ersteBasePart(modell)
 end
 
-local function ensureWorldEntry(cat, model)
-    if worldReg[cat][model] then return end
-    local rep = pickRep(model, cat)
+local function stelleWeltEintrag(kat, modell)
+    if weltReg[kat][modell] then return end
+    local rep = pickRep(modell, kat)
     if not rep then return end
-    worldReg[cat][model] = {part = rep}
+    weltReg[kat][modell] = {part = rep}
 end
 
-local function removeWorldEntry(cat, model)
-    local entry = worldReg[cat][model]
-    if not entry then return end
-    local part = entry.part
-    clearChild(part, "VD_"..cat)
-    clearChild(part, "VD_Text_"..cat)
-    worldReg[cat][model] = nil
+local function entferneWeltEintrag(kat, modell)
+    local eintrag = weltReg[kat][modell]
+    if not eintrag then return end
+    local part = eintrag.part
+    loescheKind(part, "VD_"..kat)
+    loescheKind(part, "VD_Text_"..kat)
+    weltReg[kat][modell] = nil
 end
 
-local function registerFromDescendant(obj)
-    if obj:IsA("Model") and validCats[obj.Name] then
-        ensureWorldEntry(obj.Name, obj)
+local function registriereVonNachkomme(obj)
+    if obj:IsA("Model") and gueltigeKats[obj.Name] then
+        stelleWeltEintrag(obj.Name, obj)
         return
     end
-    if obj:IsA("BasePart") and obj.Parent and obj.Parent:IsA("Model") and validCats[obj.Parent.Name] then
-        ensureWorldEntry(obj.Parent.Name, obj.Parent)
+    if obj:IsA("BasePart") and obj.Parent and obj.Parent:IsA("Model") and gueltigeKats[obj.Parent.Name] then
+        stelleWeltEintrag(obj.Parent.Name, obj.Parent)
     end
 end
 
-local function unregisterFromDescendant(obj)
-    if obj:IsA("Model") and validCats[obj.Name] then
-        removeWorldEntry(obj.Name, obj)
+local function unregistriereVonNachkomme(obj)
+    if obj:IsA("Model") and gueltigeKats[obj.Name] then
+        entferneWeltEintrag(obj.Name, obj)
         return
     end
-    if obj:IsA("BasePart") and obj.Parent and obj.Parent:IsA("Model") and validCats[obj.Parent.Name] then
-        if worldReg[obj.Parent.Name][obj.Parent] and worldReg[obj.Parent.Name][obj.Parent].part == obj then
-            removeWorldEntry(obj.Parent.Name, obj.Parent)
+    if obj:IsA("BasePart") and obj.Parent and obj.Parent:IsA("Model") and gueltigeKats[obj.Parent.Name] then
+        if weltReg[obj.Parent.Name][obj.Parent] and weltReg[obj.Parent.Name][obj.Parent].part == obj then
+            entferneWeltEintrag(obj.Parent.Name, obj.Parent)
         end
     end
 end
 
-local function attachRoot(root)
-    if not root or mapAdd[root] then return end
-    mapAdd[root] = root.DescendantAdded:Connect(registerFromDescendant)
-    mapRem[root] = root.DescendantRemoving:Connect(unregisterFromDescendant)
-    for _,d in ipairs(root:GetDescendants()) do registerFromDescendant(d) end
+local function verbindeWurzel(wurzel)
+    if not wurzel or mapAdd[wurzel] then return end
+    mapAdd[wurzel] = wurzel.DescendantAdded:Connect(registriereVonNachkomme)
+    mapRem[wurzel] = wurzel.DescendantRemoving:Connect(unregistriereVonNachkomme)
+    for _,d in ipairs(wurzel:GetDescendants()) do registriereVonNachkomme(d) end
 end
 
-local function refreshRoots()
+local function aktualisiereWurzeln()
     for _,cn in pairs(mapAdd) do if cn then cn:Disconnect() end end
     for _,cn in pairs(mapRem) do if cn then cn:Disconnect() end end
     mapAdd, mapRem = {}, {}
     local r1 = Workspace:FindFirstChild("Map")
     local r2 = Workspace:FindFirstChild("Map1")
-    if r1 then attachRoot(r1) end
-    if r2 then attachRoot(r2) end
+    if r1 then verbindeWurzel(r1) end
+    if r2 then verbindeWurzel(r2) end
 end
 
-refreshRoots()
+aktualisiereWurzeln()
 Workspace.ChildAdded:Connect(function(ch)
-    if ch.Name == "Map" or ch.Name == "Map1" then attachRoot(ch) end
+    if ch.Name == "Map" or ch.Name == "Map1" then verbindeWurzel(ch) end
 end)
 
 RunService.Heartbeat:Connect(function()
-    for cat,models in pairs(worldReg) do
-        if worldEnabled[cat] then
-            local col = worldColors[cat]
-            local tagName = "VD_"..cat
-            local textName = "VD_Text_"..cat
-            local labelText = cat == "Palletwrong" and "Pallet" or cat
-            for model,entry in pairs(models) do
-                local part = entry.part
-                if model and model.Parent and part and part.Parent then
-                    if not part:IsDescendantOf(model) then
-                        entry.part = pickRep(model, cat)
-                        part = entry.part
+    for kat,modelle in pairs(weltReg) do
+        if weltAn[kat] then
+            local col = weltFarben[kat]
+            local tagName = "VD_"..kat
+            local textName = "VD_Text_"..kat
+            local labelText = kat == "Palletwrong" and "Pallet" or kat
+            for modell,eintrag in pairs(modelle) do
+                local part = eintrag.part
+                if modell and modell.Parent and part and part.Parent then
+                    if not part:IsDescendantOf(modell) then
+                        eintrag.part = pickRep(modell, kat)
+                        part = eintrag.part
                     end
                     if part then
-                        ensureBoxESP(part, tagName, col)
+                        stelleBoxESP(part, tagName, col)
                         if not part:FindFirstChild(textName) then
-                            local bb = makeBillboard(labelText, col)
+                            local bb = erstelleBillboard(labelText, col)
                             bb.Name = textName
                             bb.Parent = part
                         else
@@ -304,64 +305,64 @@ RunService.Heartbeat:Connect(function()
                         end
                     end
                 else
-                    removeWorldEntry(cat, model)
+                    entferneWeltEintrag(kat, modell)
                 end
             end
         else
-            for _,entry in pairs(models) do
-                if entry.part then
-                    clearChild(entry.part, "VD_"..cat)
-                    clearChild(entry.part, "VD_Text_"..cat)
+            for _,eintrag in pairs(modelle) do
+                if eintrag.part then
+                    loescheKind(eintrag.part, "VD_"..kat)
+                    loescheKind(eintrag.part, "VD_Text_"..kat)
                 end
             end
         end
     end
 end)
 
-local worldSec = Tabs.World:AddSection("Toggles")
-worldSec:AddToggle("Gen", { Title = "Generators", Default = false, Callback = function(s) worldEnabled.Generator = s end })
-worldSec:AddToggle("Hook", { Title = "Hooks", Default = false, Callback = function(s) worldEnabled.Hook = s end })
-worldSec:AddToggle("Gate", { Title = "Gates", Default = false, Callback = function(s) worldEnabled.Gate = s end })
-worldSec:AddToggle("Window", { Title = "Windows", Default = false, Callback = function(s) worldEnabled.Window = s end })
-worldSec:AddToggle("Pallet", { Title = "Pallets", Default = false, Callback = function(s) worldEnabled.Palletwrong = s end })
+local weltAbschnitt = Tabs.World:AddSection("Toggles")
+weltAbschnitt:AddToggle("Gen", { Title = "Generators", Default = false, Callback = function(s) weltAn.Generator = s end })
+weltAbschnitt:AddToggle("Hook", { Title = "Hooks", Default = false, Callback = function(s) weltAn.Hook = s end })
+weltAbschnitt:AddToggle("Gate", { Title = "Gates", Default = false, Callback = function(s) weltAn.Gate = s end })
+weltAbschnitt:AddToggle("Window", { Title = "Windows", Default = false, Callback = function(s) weltAn.Window = s end })
+weltAbschnitt:AddToggle("Pallet", { Title = "Pallets", Default = false, Callback = function(s) weltAn.Palletwrong = s end })
 
-local worldCol = Tabs.World:AddSection("Colors")
-worldCol:AddColorpicker("GenCol", { Title = "Generators", Default = worldColors.Generator, Callback = function(c) worldColors.Generator = c end })
-worldCol:AddColorpicker("HookCol", { Title = "Hooks", Default = worldColors.Hook, Callback = function(c) worldColors.Hook = c end })
-worldCol:AddColorpicker("GateCol", { Title = "Gates", Default = worldColors.Gate, Callback = function(c) worldColors.Gate = c end })
-worldCol:AddColorpicker("WinCol", { Title = "Windows", Default = worldColors.Window, Callback = function(c) worldColors.Window = c end })
-worldCol:AddColorpicker("PalCol", { Title = "Pallets", Default = worldColors.Palletwrong, Callback = function(c) worldColors.Palletwrong = c end })
+local weltFarbenAbschnitt = Tabs.World:AddSection("Colors")
+weltFarbenAbschnitt:AddColorpicker("GenCol", { Title = "Generators", Default = weltFarben.Generator, Callback = function(c) weltFarben.Generator = c end })
+weltFarbenAbschnitt:AddColorpicker("HookCol", { Title = "Hooks", Default = weltFarben.Hook, Callback = function(c) weltFarben.Hook = c end })
+weltFarbenAbschnitt:AddColorpicker("GateCol", { Title = "Gates", Default = weltFarben.Gate, Callback = function(c) weltFarben.Gate = c end })
+weltFarbenAbschnitt:AddColorpicker("WinCol", { Title = "Windows", Default = weltFarben.Window, Callback = function(c) weltFarben.Window = c end })
+weltFarbenAbschnitt:AddColorpicker("PalCol", { Title = "Pallets", Default = weltFarben.Palletwrong, Callback = function(c) weltFarben.Palletwrong = c end })
 
-local noSkillConnGUI, noSkillConnChar
-local function isSkillNode(o)
+local keineSkillConnGUI, keineSkillConnChar
+local function istSkillKnoten(o)
     local n = o.Name:lower()
     return n:find("skillcheck") or n:find("skill_check") or n:find("skill") or n:find("qte")
 end
-local function purgeSkill()
+local function entferneSkill()
     local pg = LP:FindFirstChild("PlayerGui")
-    if pg then for _,d in ipairs(pg:GetDescendants()) do if isSkillNode(d) and d.Destroy then pcall(function() d:Destroy() end) end end end
+    if pg then for _,d in ipairs(pg:GetDescendants()) do if istSkillKnoten(d) and d.Destroy then pcall(function() d:Destroy() end) end end end
     local c = LP.Character
-    if c then for _,d in ipairs(c:GetDescendants()) do if isSkillNode(d) and d.Destroy then pcall(function() d:Destroy() end) end end end
+    if c then for _,d in ipairs(c:GetDescendants()) do if istSkillKnoten(d) and d.Destroy then pcall(function() d:Destroy() end) end end end
 end
 
-local miscSec = Tabs.Misc:AddSection("Skillcheck")
-miscSec:AddToggle("NoSkill", { Title = "No Skillchecks (local)", Default = false, Callback = function(s)
+local miscAbschnitt = Tabs.Misc:AddSection("Skillcheck")
+miscAbschnitt:AddToggle("NoSkill", { Title = "No Skillchecks (local)", Default = false, Callback = function(s)
     if s then
-        purgeSkill()
-        if not noSkillConnGUI then
+        entferneSkill()
+        if not keineSkillConnGUI then
             local pg = LP:FindFirstChild("PlayerGui")
-            if pg then noSkillConnGUI = pg.DescendantAdded:Connect(function(o) if isSkillNode(o) then pcall(function() o:Destroy() end) end end) end
+            if pg then keineSkillConnGUI = pg.DescendantAdded:Connect(function(o) if istSkillKnoten(o) then pcall(function() o:Destroy() end) end end) end
         end
-        if not noSkillConnChar then
-            noSkillConnChar = LP.CharacterAdded:Connect(function() task.wait(0.2) purgeSkill() end)
+        if not keineSkillConnChar then
+            keineSkillConnChar = LP.CharacterAdded:Connect(function() task.wait(0.2) entferneSkill() end)
         end
     else
-        if noSkillConnGUI then noSkillConnGUI:Disconnect() noSkillConnGUI=nil end
-        if noSkillConnChar then noSkillConnChar:Disconnect() noSkillConnChar=nil end
+        if keineSkillConnGUI then keineSkillConnGUI:Disconnect() keineSkillConnGUI=nil end
+        if keineSkillConnChar then keineSkillConnChar:Disconnect() keineSkillConnChar=nil end
     end
 end})
 
-local initLighting = {
+local initLicht = {
     Brightness = Lighting.Brightness,
     ClockTime = Lighting.ClockTime,
     FogStart = Lighting.FogStart,
@@ -371,16 +372,16 @@ local initLighting = {
     ExposureCompensation = Lighting.ExposureCompensation
 }
 
-local fullbrightEnabled = false
-local fbLoop
+local vollhellAn = false
+local vollhellSchleife
 
-local visSec = Tabs.Visual:AddSection("Lighting")
-visSec:AddToggle("Fullbright", { Title = "Fullbright", Default = false, Callback = function(s)
-    fullbrightEnabled = s
-    if fbLoop then task.cancel(fbLoop) fbLoop=nil end
+local visualAbschnitt = Tabs.Visual:AddSection("Lighting")
+visualAbschnitt:AddToggle("Fullbright", { Title = "Fullbright", Default = false, Callback = function(s)
+    vollhellAn = s
+    if vollhellSchleife then task.cancel(vollhellSchleife) vollhellSchleife=nil end
     if s then
-        fbLoop = task.spawn(function()
-            while fullbrightEnabled do
+        vollhellSchleife = task.spawn(function()
+            while vollhellAn do
                 Lighting.Brightness = 2
                 Lighting.ClockTime = 14
                 Lighting.FogStart = 0
@@ -392,105 +393,105 @@ visSec:AddToggle("Fullbright", { Title = "Fullbright", Default = false, Callback
             end
         end)
     else
-        for k,v in pairs(initLighting) do pcall(function() Lighting[k]=v end) end
+        for k,v in pairs(initLicht) do pcall(function() Lighting[k]=v end) end
     end
 end})
-visSec:AddSlider("TimeOfDay", { Title = "Time Of Day", Min = 0, Max = 24, Default = Lighting.ClockTime, Rounding = 1, Callback = function(v) Lighting.ClockTime = v end })
+visualAbschnitt:AddSlider("TimeOfDay", { Title = "Time Of Day", Min = 0, Max = 24, Default = Lighting.ClockTime, Rounding = 1, Callback = function(v) Lighting.ClockTime = v end })
 
-local currentSpeed = 16
+local aktuelleGeschwindigkeit = 16
 local speedHumanoid = nil
 local speedConnChanged, speedConnAncestry = nil, nil
-local speedBound = false
+local speedGebunden = false
 
-local function setWalkSpeed(h, v)
+local function setzeLaufgeschwindigkeit(h, v)
     if h and h.Parent then pcall(function() h.WalkSpeed = v end) end
 end
 
-local function bindSpeedLoop()
-    if speedBound then return end
-    speedBound = true
+local function bindeSpeedSchleife()
+    if speedGebunden then return end
+    speedGebunden = true
     RunService:BindToRenderStep("VD_SpeedEnforcer", 300, function()
         if not speedHumanoid or not speedHumanoid.Parent then return end
-        if speedHumanoid.WalkSpeed ~= currentSpeed then setWalkSpeed(speedHumanoid, currentSpeed) end
+        if speedHumanoid.WalkSpeed ~= aktuelleGeschwindigkeit then setzeLaufgeschwindigkeit(speedHumanoid, aktuelleGeschwindigkeit) end
     end)
 end
 
-local function unbindSpeedLoop()
-    if speedBound then
-        speedBound = false
+local function entbindeSpeedSchleife()
+    if speedGebunden then
+        speedGebunden = false
         pcall(function() RunService:UnbindFromRenderStep("VD_SpeedEnforcer") end)
     end
 end
 
-local function hookHumanoid(h)
+local function hakeHumanoid(h)
     if speedConnChanged then speedConnChanged:Disconnect() speedConnChanged=nil end
     if speedConnAncestry then speedConnAncestry:Disconnect() speedConnAncestry=nil end
     speedHumanoid = h
-    setWalkSpeed(h, currentSpeed)
-    bindSpeedLoop()
+    setzeLaufgeschwindigkeit(h, aktuelleGeschwindigkeit)
+    bindeSpeedSchleife()
     speedConnChanged = h:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
-        if h.Parent and h.WalkSpeed ~= currentSpeed then setWalkSpeed(h, currentSpeed) end
+        if h.Parent and h.WalkSpeed ~= aktuelleGeschwindigkeit then setzeLaufgeschwindigkeit(h, aktuelleGeschwindigkeit) end
     end)
     speedConnAncestry = h.AncestryChanged:Connect(function(_, parent)
-        if not parent then unbindSpeedLoop() end
+        if not parent then entbindeSpeedSchleife() end
     end)
 end
 
-local function onCharacterAdded(char)
+local function beiCharHinzu(char)
     local h = char:WaitForChild("Humanoid", 10) or char:FindFirstChildOfClass("Humanoid")
-    if h then hookHumanoid(h) end
-    char.ChildAdded:Connect(function(ch) if ch:IsA("Humanoid") then hookHumanoid(ch) end end)
+    if h then hakeHumanoid(h) end
+    char.ChildAdded:Connect(function(ch) if ch:IsA("Humanoid") then hakeHumanoid(ch) end end)
 end
 
-if LP.Character then onCharacterAdded(LP.Character) end
-LP.CharacterAdded:Connect(onCharacterAdded)
+if LP.Character then beiCharHinzu(LP.Character) end
+LP.CharacterAdded:Connect(beiCharHinzu)
 
-local noclipEnabled = false
-local noclipConn = nil
-local noclipTouched = {}
+local noclipAn = false
+local noclipVerbindung = nil
+local noclipBeruehrt = {}
 
-local function setNoclip(state)
-    if state and not noclipConn then
-        noclipEnabled = true
-        noclipConn = RunService.Stepped:Connect(function()
+local function setzeNoclip(zustand)
+    if zustand and not noclipVerbindung then
+        noclipAn = true
+        noclipVerbindung = RunService.Stepped:Connect(function()
             local c = LP.Character
             if not c then return end
             for _,part in ipairs(c:GetDescendants()) do
                 if part:IsA("BasePart") then
-                    if part.CanCollide and not noclipTouched[part] then
-                        noclipTouched[part] = true
+                    if part.CanCollide and not noclipBeruehrt[part] then
+                        noclipBeruehrt[part] = true
                     end
                     part.CanCollide = false
                 end
             end
         end)
-    elseif not state and noclipConn then
-        noclipEnabled = false
-        noclipConn:Disconnect()
-        noclipConn = nil
-        for part,_ in pairs(noclipTouched) do
+    elseif not zustand and noclipVerbindung then
+        noclipAn = false
+        noclipVerbindung:Disconnect()
+        noclipVerbindung = nil
+        for part,_ in pairs(noclipBeruehrt) do
             if part and part.Parent then part.CanCollide = true end
         end
-        noclipTouched = {}
+        noclipBeruehrt = {}
     end
 end
 
-local playerMove = Tabs.Player:AddSection("Movement")
-playerMove:AddSlider("WalkSpeed", { Title = "Walk Speed", Min = 0, Max = 200, Default = 16, Rounding = 0, Callback = function(v)
-    currentSpeed = v
-    if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid, currentSpeed) end
-    bindSpeedLoop()
+local spielerBewegung = Tabs.Player:AddSection("Movement")
+spielerBewegung:AddSlider("WalkSpeed", { Title = "Walk Speed", Min = 0, Max = 200, Default = 16, Rounding = 0, Callback = function(v)
+    aktuelleGeschwindigkeit = v
+    if speedHumanoid and speedHumanoid.Parent then setzeLaufgeschwindigkeit(speedHumanoid, aktuelleGeschwindigkeit) end
+    bindeSpeedSchleife()
 end})
-playerMove:AddButton({ Title = "Reset Speed", Callback = function()
-    currentSpeed = 16
-    if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid, currentSpeed) end
+spielerBewegung:AddButton({ Title = "Reset Speed", Callback = function()
+    aktuelleGeschwindigkeit = 16
+    if speedHumanoid and speedHumanoid.Parent then setzeLaufgeschwindigkeit(speedHumanoid, aktuelleGeschwindigkeit) end
 end})
-playerMove:AddToggle("Noclip", { Title = "Noclip", Default = false, Callback = function(s)
-    setNoclip(s)
+spielerBewegung:AddToggle("Noclip", { Title = "Noclip", Default = false, Callback = function(s)
+    setzeNoclip(s)
 end})
 
 LP.CharacterAdded:Connect(function()
-    if noclipEnabled then task.wait(0.2) setNoclip(true) end
+    if noclipAn then task.wait(0.2) setzeNoclip(true) end
 end)
 
 SaveManager:SetLibrary(Fluent)
@@ -505,3 +506,101 @@ SaveManager:LoadAutoloadConfig()
 
 Fluent:Notify({ Title = "Violence District", Content = "Loaded", Duration = 8 })
 Window:SelectTab(1)
+
+if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+    local mobileGui = Instance.new("ScreenGui")
+    mobileGui.Name = "VD_Mobile"
+    mobileGui.ResetOnSpawn = false
+    mobileGui.IgnoreGuiInset = true
+    mobileGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    mobileGui.Parent = LP:WaitForChild("PlayerGui")
+
+    local mobileKnopf = Instance.new("TextButton")
+    mobileKnopf.Name = "VD_Toggle"
+    mobileKnopf.AnchorPoint = Vector2.new(0,1)
+    mobileKnopf.Position = UDim2.new(0, 12, 1, -12)
+    mobileKnopf.Size = UDim2.new(0, 56, 0, 56)
+    mobileKnopf.Text = "Menü"
+    mobileKnopf.TextScaled = true
+    mobileKnopf.BackgroundTransparency = 0.15
+    mobileKnopf.BackgroundColor3 = Color3.fromRGB(30,30,30)
+    mobileKnopf.BorderSizePixel = 0
+    mobileKnopf.AutoButtonColor = true
+    mobileKnopf.Parent = mobileGui
+    local mobileEcke = Instance.new("UICorner")
+    mobileEcke.CornerRadius = UDim.new(0, 16)
+    mobileEcke.Parent = mobileKnopf
+    local mobileSchatten = Instance.new("UIStroke")
+    mobileSchatten.Thickness = 1.5
+    mobileSchatten.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    mobileSchatten.Color = Color3.fromRGB(70,70,70)
+    mobileSchatten.Parent = mobileKnopf
+    local mobilePadding = Instance.new("UIPadding")
+    mobilePadding.PaddingBottom = UDim.new(0,6)
+    mobilePadding.PaddingTop = UDim.new(0,6)
+    mobilePadding.PaddingLeft = UDim.new(0,6)
+    mobilePadding.PaddingRight = UDim.new(0,6)
+    mobilePadding.Parent = mobileKnopf
+
+    local menueSichtbar = true
+
+    local function menueEinblenden()
+        local ok = false
+        if Window and typeof(Window) == "table" then
+            ok = pcall(function() Window:Show() end)
+            if not ok then ok = pcall(function() Window:SetVisible(true) end) end
+            if not ok then ok = pcall(function() Window:Minimize(false) end) end
+            if not ok then ok = pcall(function() Window:Toggle() end) end
+        end
+        menueSichtbar = true
+    end
+
+    local function menueAusblenden()
+        local ok = false
+        if Window and typeof(Window) == "table" then
+            ok = pcall(function() Window:Hide() end)
+            if not ok then ok = pcall(function() Window:SetVisible(false) end) end
+            if not ok then ok = pcall(function() Window:Minimize(true) end) end
+            if not ok then ok = pcall(function() Window:Toggle() end) end
+        end
+        menueSichtbar = false
+    end
+
+    local function menueUmschalten()
+        if menueSichtbar then menueAusblenden() else menueEinblenden() end
+    end
+
+    mobileKnopf.MouseButton1Click:Connect(menueUmschalten)
+    mobileKnopf.TouchTap:Connect(menueUmschalten)
+
+    local zieheAktiv = false
+    local ziehStartPos = nil
+    local knopfStartPos = nil
+
+    mobileKnopf.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            zieheAktiv = true
+            ziehStartPos = input.Position
+            knopfStartPos = mobileKnopf.Position
+        end
+    end)
+
+    mobileKnopf.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            zieheAktiv = false
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if zieheAktiv and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+            local delta = input.Position - ziehStartPos
+            local vw = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize.X or 1920
+            local vh = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize.Y or 1080
+            local neueX = math.clamp(knopfStartPos.X.Offset + delta.X, 8, vw - mobileKnopf.AbsoluteSize.X - 8)
+            local neueY = math.clamp(knopfStartPos.Y.Offset + delta.Y, 8, vh - mobileKnopf.AbsoluteSize.Y - 8)
+            mobileKnopf.Position = UDim2.new(0, neueX, 0, neueY)
+        end
+    end)
+
+    menueAusblenden()
+end
