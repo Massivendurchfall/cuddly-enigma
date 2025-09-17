@@ -202,13 +202,14 @@ local worldReg = {Generator={},Hook={},Gate={},Window={},Palletwrong={}}
 local mapAdd, mapRem = {}, {}
 
 local function pickRep(model, cat)
+    if not model then return nil end
     if cat == "Generator" then
         local hb = model:FindFirstChild("HitBox", true)
         if hb and hb:IsA("BasePart") then return hb end
     elseif cat == "Palletwrong" then
         local a = model:FindFirstChild("HumanoidRootPart", true)
         if a and a:IsA("BasePart") then return a end
-        local b = model:FindChild("PrimaryPartPallet")
+        local b = model:FindFirstChild("PrimaryPartPallet", true)
         if b and b:IsA("BasePart") then return b end
         local c = model:FindFirstChild("Primary1", true)
         if c and c:IsA("BasePart") then return c end
@@ -600,5 +601,5 @@ InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
-Fluent:Notify({ Title = "Violence District", Content = "Loaded. Skillcheck removal set to aggressive.", Duration = 4 })
+Fluent:Notify({ Title = "Violence District", Content = "Loaded. Picker fix applied.", Duration = 4 })
 Window:SelectTab(1)
