@@ -486,7 +486,7 @@ visSec:AddToggle("Fullbright", { Title = "Fullbright", Default = false, Callback
         for k,v in pairs(initLighting) do pcall(function() Lighting[k]=v end) end
     end
 end})
-visSec:AddSlider("TimeOfDay", { Title = "Time Of Day", Min = 0, Max = 24, Default = 10, Rounding = 1, Callback = function(v) Lighting.ClockTime = v end })
+visSec:AddSlider("TimeOfDay", { Title = "Time Of Day", Min = 0, Max = 24, Default = Lighting.ClockTime, Rounding = 1, Callback = function(v) Lighting.ClockTime = v end })
 
 local currentSpeed = 16
 local speedHumanoid = nil
@@ -594,5 +594,5 @@ InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
-Fluent:Notify({ Title = "Violence District", Content = "Loaded", Duration = 4 })
+Fluent:Notify({ Title = "Violence District", Content = "Loaded. made by JLCFG", Duration = 8 })
 Window:SelectTab(1)
