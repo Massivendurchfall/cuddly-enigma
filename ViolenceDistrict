@@ -208,7 +208,7 @@ local function pickRep(model, cat)
     elseif cat == "Palletwrong" then
         local a = model:FindFirstChild("HumanoidRootPart", true)
         if a and a:IsA("BasePart") then return a end
-        local b = model:FindFirstChild("PrimaryPartPallet", true)
+        local b = model:FindChild("PrimaryPartPallet")
         if b and b:IsA("BasePart") then return b end
         local c = model:FindFirstChild("Primary1", true)
         if c and c:IsA("BasePart") then return c end
@@ -332,34 +332,131 @@ worldCol:AddColorpicker("GateCol", { Title = "Gates", Default = worldColors.Gate
 worldCol:AddColorpicker("WinCol", { Title = "Windows", Default = worldColors.Window, Callback = function(c) worldColors.Window = c end })
 worldCol:AddColorpicker("PalCol", { Title = "Pallets", Default = worldColors.Palletwrong, Callback = function(c) worldColors.Palletwrong = c end })
 
-local noSkillConnGUI, noSkillConnChar
-local function isSkillNode(o)
-    local n = o.Name:lower()
-    return n:find("skillcheck") or n:find("skill_check") or n:find("skill") or n:find("qte")
+local function textMatchAny(s, words)
+    s = tostring(s or ""):lower()
+    for _,w in ipairs(words) do
+        if s:find(w, 1, true) then return true end
+    end
+    return false
 end
-local function purgeSkill()
+
+local guiWhitelist = {
+    ["Fluent"] = true,
+    ["DevConsoleMaster"] = true,
+    ["RobloxGui"] = true,
+    ["PlayerList"] = true,
+    ["Chat"] = true,
+    ["BubbleChat"] = true,
+    ["Backpack"] = true
+}
+
+local skillWordsName = {"skill","check","qte","quick","timing","bar","ring","slider","tap","hold","skillcheck","minigame"}
+local skillWordsText = {"skill","check","qte","tap","space","perfect","great","good","hit","timing","hold","release"}
+
+local function looksLikeSkillGui(inst)
+    local n = tostring(inst.Name or ""):lower()
+    local cls = inst.ClassName or ""
+    if string.find(cls, "Gui") then
+        if textMatchAny(n, skillWordsName) then return true end
+        local lbl = inst:FindFirstChildWhichIsA("TextLabel", true)
+        if lbl and textMatchAny(lbl.Text, skillWordsText) then return true end
+        local img = inst:FindFirstChildWhichIsA("ImageLabel", true)
+        if img and textMatchAny(img.Name, skillWordsName) then return true end
+    end
+    if inst:IsA("ProximityPrompt") then
+        if textMatchAny(inst.Name, skillWordsName) then return true end
+        if textMatchAny(inst.ActionText or "", skillWordsText) then return true end
+        if textMatchAny(inst.ObjectText or "", skillWordsText) then return true end
+    end
+    return false
+end
+
+local function hardDelete(obj)
+    pcall(function()
+        if obj:IsA("ProximityPrompt") then
+            obj.Enabled = false
+            obj.HoldDuration = 9e9
+        end
+        if obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") or obj:IsA("ScreenGui") then
+            if obj:IsA("ScreenGui") and guiWhitelist[obj.Name] then return end
+            obj.Enabled = false
+            obj.ResetOnSpawn = false
+            obj.DisplayOrder = -1
+            obj.Visible = false
+            obj:Destroy()
+        else
+            obj:Destroy()
+        end
+    end)
+end
+
+local function nukeSkillOnce()
     local pg = LP:FindFirstChild("PlayerGui")
-    if pg then for _,d in ipairs(pg:GetDescendants()) do if isSkillNode(d) and d.Destroy then pcall(function() d:Destroy() end) end end end
-    local c = LP.Character
-    if c then for _,d in ipairs(c:GetDescendants()) do if isSkillNode(d) and d.Destroy then pcall(function() d:Destroy() end) end end end
+    if pg then
+        for _,g in ipairs(pg:GetChildren()) do
+            if not guiWhitelist[g.Name] and looksLikeSkillGui(g) then hardDelete(g) end
+        end
+        for _,d in ipairs(pg:GetDescendants()) do
+            if looksLikeSkillGui(d) then hardDelete(d) end
+        end
+    end
+    for _,d in ipairs(Workspace:GetDescendants()) do
+        if looksLikeSkillGui(d) then hardDelete(d) end
+    end
+end
+
+local noSkillEnabled = false
+local noSkillConns = {}
+local function connectNoSkill()
+    if noSkillConns.pgAdd then noSkillConns.pgAdd:Disconnect() end
+    if noSkillConns.pgDesc then noSkillConns.pgDesc:Disconnect() end
+    if noSkillConns.wsDesc then noSkillConns.wsDesc:Disconnect() end
+    local pg = LP:FindFirstChild("PlayerGui")
+    if pg then
+        noSkillConns.pgAdd = pg.ChildAdded:Connect(function(ch)
+            if not noSkillEnabled then return end
+            if not guiWhitelist[ch.Name] and looksLikeSkillGui(ch) then hardDelete(ch) end
+        end)
+        noSkillConns.pgDesc = pg.DescendantAdded:Connect(function(d)
+            if not noSkillEnabled then return end
+            if looksLikeSkillGui(d) then hardDelete(d) end
+        end)
+    end
+    noSkillConns.wsDesc = Workspace.DescendantAdded:Connect(function(d)
+        if not noSkillEnabled then return end
+        if looksLikeSkillGui(d) then hardDelete(d) end
+    end)
+end
+
+local function disconnectNoSkill()
+    for k,cn in pairs(noSkillConns) do if cn then cn:Disconnect() end noSkillConns[k]=nil end
 end
 
 local miscSec = Tabs.Misc:AddSection("Skillcheck")
-miscSec:AddToggle("NoSkill", { Title = "No Skillchecks (local)", Default = false, Callback = function(s)
-    if s then
-        purgeSkill()
-        if not noSkillConnGUI then
-            local pg = LP:FindFirstChild("PlayerGui")
-            if pg then noSkillConnGUI = pg.DescendantAdded:Connect(function(o) if isSkillNode(o) then pcall(function() o:Destroy() end) end end) end
+miscSec:AddToggle("NoSkill", {
+    Title = "No Skillchecks (aggressive)",
+    Default = false,
+    Callback = function(s)
+        noSkillEnabled = s
+        if s then
+            nukeSkillOnce()
+            connectNoSkill()
+            if noSkillConns.loop then task.cancel(noSkillConns.loop) end
+            noSkillConns.loop = task.spawn(function()
+                while noSkillEnabled do
+                    nukeSkillOnce()
+                    task.wait(0.35)
+                end
+            end)
+            LP.CharacterAdded:Connect(function()
+                if noSkillEnabled then task.wait(0.25) nukeSkillOnce() end
+            end)
+        else
+            disconnectNoSkill()
+            if noSkillConns.loop then task.cancel(noSkillConns.loop) noSkillConns.loop=nil end
         end
-        if not noSkillConnChar then
-            noSkillConnChar = LP.CharacterAdded:Connect(function() task.wait(0.2) purgeSkill() end)
-        end
-    else
-        if noSkillConnGUI then noSkillConnGUI:Disconnect() noSkillConnGUI=nil end
-        if noSkillConnChar then noSkillConnChar:Disconnect() noSkillConnChar=nil end
     end
-end})
+})
 
 local initLighting = {
     Brightness = Lighting.Brightness,
@@ -395,7 +492,6 @@ visSec:AddToggle("Fullbright", { Title = "Fullbright", Default = false, Callback
         for k,v in pairs(initLighting) do pcall(function() Lighting[k]=v end) end
     end
 end})
-
 visSec:AddSlider("TimeOfDay", { Title = "Time Of Day", Min = 0, Max = 24, Default = Lighting.ClockTime, Rounding = 1, Callback = function(v) Lighting.ClockTime = v end })
 
 local currentSpeed = 16
@@ -446,6 +542,36 @@ end
 if LP.Character then onCharacterAdded(LP.Character) end
 LP.CharacterAdded:Connect(onCharacterAdded)
 
+local noclipEnabled = false
+local noclipConn = nil
+local noclipTouched = {}
+
+local function setNoclip(state)
+    if state and not noclipConn then
+        noclipEnabled = true
+        noclipConn = RunService.Stepped:Connect(function()
+            local c = LP.Character
+            if not c then return end
+            for _,part in ipairs(c:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    if part.CanCollide and not noclipTouched[part] then
+                        noclipTouched[part] = true
+                    end
+                    part.CanCollide = false
+                end
+            end
+        end)
+    elseif not state and noclipConn then
+        noclipEnabled = false
+        noclipConn:Disconnect()
+        noclipConn = nil
+        for part,_ in pairs(noclipTouched) do
+            if part and part.Parent then part.CanCollide = true end
+        end
+        noclipTouched = {}
+    end
+end
+
 local playerMove = Tabs.Player:AddSection("Movement")
 playerMove:AddSlider("WalkSpeed", { Title = "Walk Speed", Min = 0, Max = 200, Default = 16, Rounding = 0, Callback = function(v)
     currentSpeed = v
@@ -456,6 +582,13 @@ playerMove:AddButton({ Title = "Reset Speed", Callback = function()
     currentSpeed = 16
     if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid, currentSpeed) end
 end})
+playerMove:AddToggle("Noclip", { Title = "Noclip", Default = false, Callback = function(s)
+    setNoclip(s)
+end})
+
+LP.CharacterAdded:Connect(function()
+    if noclipEnabled then task.wait(0.2) setNoclip(true) end
+end)
 
 SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
@@ -467,5 +600,5 @@ InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
-Fluent:Notify({ Title = "Violence District", Content = "Loaded, made by JLCFG on Discord", Duration = 7 })
+Fluent:Notify({ Title = "Violence District", Content = "Loaded. Skillcheck removal set to aggressive.", Duration = 4 })
 Window:SelectTab(1)
