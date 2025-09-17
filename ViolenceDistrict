@@ -7,6 +7,7 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local UserInputService = game:GetService("UserInputService")
+local TextChatService = game:GetService("TextChatService")
 local LP = Players.LocalPlayer
 
 local Window = Fluent:CreateWindow({
@@ -160,24 +161,6 @@ local function entbeobachteSpieler(p)
     if spielerVerbindungen[p] then for _,cn in ipairs(spielerVerbindungen[p]) do cn:Disconnect() end end
     spielerVerbindungen[p] = nil
 end
-
-local spielerAbschnitt = Tabs.ESP:AddSection("Players")
-spielerAbschnitt:AddToggle("PlayerESP", { Title = "Player ESP (Chams)", Default = false, Callback = function(s)
-    spielerESPAn = s
-    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then anwendeSpielerESP(pl) end end
-end})
-spielerAbschnitt:AddToggle("Nametags", { Title = "Nametags", Default = false, Callback = function(s)
-    namensschilderAn = s
-    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then anwendeSpielerESP(pl) end end
-end})
-spielerAbschnitt:AddColorpicker("SurvivorCol", { Title = "Survivor Color", Default = farbeUeberlebender, Callback = function(c)
-    farbeUeberlebender = c
-    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then anwendeSpielerESP(pl) end end
-end})
-spielerAbschnitt:AddColorpicker("KillerCol", { Title = "Killer Color", Default = farbeKiller, Callback = function(c)
-    farbeKiller = c
-    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then anwendeSpielerESP(pl) end end
-end})
 
 for _,p in ipairs(Players:GetPlayers()) do if p ~= LP then beobachteSpieler(p) end end
 Players.PlayerAdded:Connect(beobachteSpieler)
@@ -507,6 +490,56 @@ SaveManager:LoadAutoloadConfig()
 Fluent:Notify({ Title = "Violence District", Content = "Loaded", Duration = 8 })
 Window:SelectTab(1)
 
+local menueSichtbar = true
+local function menueEinblenden()
+    local ok = false
+    if Window and typeof(Window) == "table" then
+        ok = pcall(function() Window:Show() end)
+        if not ok then ok = pcall(function() Window:SetVisible(true) end) end
+        if not ok then ok = pcall(function() Window:Minimize(false) end) end
+        if not ok then ok = pcall(function() Window:Toggle() end) end
+    end
+    menueSichtbar = true
+end
+local function menueAusblenden()
+    local ok = false
+    if Window and typeof(Window) == "table" then
+        ok = pcall(function() Window:Hide() end)
+        if not ok then ok = pcall(function() Window:SetVisible(false) end) end
+        if not ok then ok = pcall(function() Window:Minimize(true) end) end
+        if not ok then ok = pcall(function() Window:Toggle() end) end
+    end
+    menueSichtbar = false
+end
+local function menueUmschalten()
+    if menueSichtbar then menueAusblenden() else menueEinblenden() end
+end
+
+local function pruefeChatBefehl(t)
+    local s = tostring(t or ""):lower()
+    if s == "/gui" or s == "/menu" or s == "!gui" then
+        menueUmschalten()
+        Fluent:Notify({ Title = "Violence District", Content = menueSichtbar and "GUI geöffnet" or "GUI ausgeblendet", Duration = 3 })
+        return true
+    end
+    return false
+end
+
+LP.Chatted:Connect(function(msg)
+    pruefeChatBefehl(msg)
+end)
+
+pcall(function()
+    if TextChatService and TextChatService.SendingMessage then
+        TextChatService.SendingMessage:Connect(function(props)
+            if props and props.Text then
+                if pruefeChatBefehl(props.Text) then
+                end
+            end
+        end)
+    end
+end)
+
 if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
     local mobileGui = Instance.new("ScreenGui")
     mobileGui.Name = "VD_Mobile"
@@ -542,36 +575,8 @@ if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
     mobilePadding.PaddingRight = UDim.new(0,6)
     mobilePadding.Parent = mobileKnopf
 
-    local menueSichtbar = true
-
-    local function menueEinblenden()
-        local ok = false
-        if Window and typeof(Window) == "table" then
-            ok = pcall(function() Window:Show() end)
-            if not ok then ok = pcall(function() Window:SetVisible(true) end) end
-            if not ok then ok = pcall(function() Window:Minimize(false) end) end
-            if not ok then ok = pcall(function() Window:Toggle() end) end
-        end
-        menueSichtbar = true
-    end
-
-    local function menueAusblenden()
-        local ok = false
-        if Window and typeof(Window) == "table" then
-            ok = pcall(function() Window:Hide() end)
-            if not ok then ok = pcall(function() Window:SetVisible(false) end) end
-            if not ok then ok = pcall(function() Window:Minimize(true) end) end
-            if not ok then ok = pcall(function() Window:Toggle() end) end
-        end
-        menueSichtbar = false
-    end
-
-    local function menueUmschalten()
-        if menueSichtbar then menueAusblenden() else menueEinblenden() end
-    end
-
     mobileKnopf.MouseButton1Click:Connect(menueUmschalten)
-    mobileKnopf.TouchTap:Connect(menueUmschalten)
+    if mobileKnopf.TouchTap then mobileKnopf.TouchTap:Connect(menueUmschalten) end
 
     local zieheAktiv = false
     local ziehStartPos = nil
