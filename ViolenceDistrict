@@ -6,6 +6,8 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
 local LP = Players.LocalPlayer
 
 local Window = Fluent:CreateWindow({
@@ -351,24 +353,19 @@ local guiWhitelist = {
     ["Backpack"] = true
 }
 
-local skillWordsName = {"skill","check","qte","quick","timing","bar","ring","slider","tap","hold","skillcheck","minigame"}
-local skillWordsText = {"skill","check","qte","tap","space","perfect","great","good","hit","timing","hold","release"}
+local skillExactNames = {
+    SkillCheckPromptGui = true,
+    ["SkillCheckPromptGui-con"] = true,
+    SkillCheckEvent = true,
+    SkillCheckFailEvent = true,
+    SkillCheckResultEvent = true
+}
 
-local function looksLikeSkillGui(inst)
-    local n = tostring(inst.Name or ""):lower()
-    local cls = inst.ClassName or ""
-    if string.find(cls, "Gui") then
-        if textMatchAny(n, skillWordsName) then return true end
-        local lbl = inst:FindFirstChildWhichIsA("TextLabel", true)
-        if lbl and textMatchAny(lbl.Text, skillWordsText) then return true end
-        local img = inst:FindFirstChildWhichIsA("ImageLabel", true)
-        if img and textMatchAny(img.Name, skillWordsName) then return true end
-    end
-    if inst:IsA("ProximityPrompt") then
-        if textMatchAny(inst.Name, skillWordsName) then return true end
-        if textMatchAny(inst.ActionText or "", skillWordsText) then return true end
-        if textMatchAny(inst.ObjectText or "", skillWordsText) then return true end
-    end
+local function isExactSkill(inst)
+    local n = inst and inst.Name
+    if not n then return false end
+    if skillExactNames[n] then return true end
+    if n:lower():find("skillcheck", 1, true) then return true end
     return false
 end
 
@@ -376,14 +373,13 @@ local function hardDelete(obj)
     pcall(function()
         if obj:IsA("ProximityPrompt") then
             obj.Enabled = false
-            obj.HoldDuration = 9e9
+            obj.HoldDuration = 1e9
         end
-        if obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") or obj:IsA("ScreenGui") then
+        if obj:IsA("ScreenGui") or obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
             if obj:IsA("ScreenGui") and guiWhitelist[obj.Name] then return end
             obj.Enabled = false
-            obj.ResetOnSpawn = false
-            obj.DisplayOrder = -1
             obj.Visible = false
+            obj.ResetOnSpawn = false
             obj:Destroy()
         else
             obj:Destroy()
@@ -391,50 +387,96 @@ local function hardDelete(obj)
     end)
 end
 
-local function nukeSkillOnce()
+local function nukeSkillExactOnce()
     local pg = LP:FindFirstChild("PlayerGui")
     if pg then
-        for _,g in ipairs(pg:GetChildren()) do
-            if not guiWhitelist[g.Name] and looksLikeSkillGui(g) then hardDelete(g) end
-        end
-        for _,d in ipairs(pg:GetDescendants()) do
-            if looksLikeSkillGui(d) then hardDelete(d) end
-        end
+        for _,g in ipairs(pg:GetChildren()) do if isExactSkill(g) then hardDelete(g) end end
+        for _,d in ipairs(pg:GetDescendants()) do if isExactSkill(d) then hardDelete(d) end end
     end
-    for _,d in ipairs(Workspace:GetDescendants()) do
-        if looksLikeSkillGui(d) then hardDelete(d) end
+    for _,g in ipairs(StarterGui:GetChildren()) do if isExactSkill(g) then hardDelete(g) end end
+    local rem = ReplicatedStorage:FindFirstChild("Remotes")
+    if rem then
+        for _,d in ipairs(rem:GetDescendants()) do if isExactSkill(d) then hardDelete(d) end end
     end
 end
 
 local noSkillEnabled = false
-local nsConnPGAdd, nsConnPGDesc, nsConnWSDesc, nsCharAdded
+local hookInstalled = false
+local rsAddConn, pgAddConn, pgDescConn, sgAddConn, remAddConn, wsAddConn
+local charAddConns = {}
 
-local function connectNoSkill()
+local function installNamecallBlock()
+    if hookInstalled then return end
+    if typeof(hookmetamethod)=="function" and typeof(getnamecallmethod)=="function" then
+        local old
+        old = hookmetamethod(game, "__namecall", function(self, ...)
+            local m = getnamecallmethod()
+            if noSkillEnabled and typeof(self)=="Instance" and isExactSkill(self) and (m=="FireServer" or m=="InvokeServer") then
+                return nil
+            end
+            return old(self, ...)
+        end)
+        hookInstalled = true
+    end
+end
+
+local function startNoSkill()
+    installNamecallBlock()
+    nukeSkillExactOnce()
     local pg = LP:FindFirstChild("PlayerGui")
     if pg then
-        nsConnPGAdd = pg.ChildAdded:Connect(function(ch)
-            if not noSkillEnabled then return end
-            if not guiWhitelist[ch.Name] and looksLikeSkillGui(ch) then hardDelete(ch) end
+        if pgAddConn then pgAddConn:Disconnect() end
+        pgAddConn = pg.ChildAdded:Connect(function(ch)
+            if noSkillEnabled and isExactSkill(ch) then hardDelete(ch) end
         end)
-        nsConnPGDesc = pg.DescendantAdded:Connect(function(d)
-            if not noSkillEnabled then return end
-            if looksLikeSkillGui(d) then hardDelete(d) end
+        if pgDescConn then pgDescConn:Disconnect() end
+        pgDescConn = pg.DescendantAdded:Connect(function(d)
+            if noSkillEnabled and isExactSkill(d) then hardDelete(d) end
         end)
     end
-    nsConnWSDesc = Workspace.DescendantAdded:Connect(function(d)
-        if not noSkillEnabled then return end
-        if looksLikeSkillGui(d) then hardDelete(d) end
+    if sgAddConn then sgAddConn:Disconnect() end
+    sgAddConn = StarterGui.ChildAdded:Connect(function(ch)
+        if noSkillEnabled and isExactSkill(ch) then hardDelete(ch) end
     end)
-    nsCharAdded = LP.CharacterAdded:Connect(function()
-        if noSkillEnabled then task.wait(0.25) nukeSkillOnce() end
+    local rem = ReplicatedStorage:FindFirstChild("Remotes")
+    if rem then
+        if remAddConn then remAddConn:Disconnect() end
+        remAddConn = rem.DescendantAdded:Connect(function(d)
+            if noSkillEnabled and isExactSkill(d) then hardDelete(d) end
+        end)
+    end
+    if rsAddConn then rsAddConn:Disconnect() end
+    rsAddConn = ReplicatedStorage.DescendantAdded:Connect(function(d)
+        if not noSkillEnabled then return end
+        if d:IsA("ScreenGui") or d:IsA("BillboardGui") or d:IsA("SurfaceGui") or d:IsA("RemoteEvent") or d:IsA("RemoteFunction") or d:IsA("BindableEvent") then
+            if isExactSkill(d) then hardDelete(d) end
+        end
+    end)
+    for _,pl in ipairs(Players:GetPlayers()) do
+        if charAddConns[pl] then charAddConns[pl]:Disconnect() end
+        charAddConns[pl] = pl.CharacterAdded:Connect(function(ch)
+            if not noSkillEnabled then return end
+            task.wait(0.1)
+            for _,d in ipairs(ch:GetDescendants()) do if isExactSkill(d) then hardDelete(d) end end
+        end)
+        if pl.Character then
+            for _,d in ipairs(pl.Character:GetDescendants()) do if isExactSkill(d) then hardDelete(d) end end
+        end
+    end
+    if wsAddConn then wsAddConn:Disconnect() end
+    wsAddConn = Workspace.DescendantAdded:Connect(function(d)
+        if noSkillEnabled and isExactSkill(d) then hardDelete(d) end
     end)
 end
 
-local function disconnectNoSkill()
-    if nsConnPGAdd then nsConnPGAdd:Disconnect() nsConnPGAdd=nil end
-    if nsConnPGDesc then nsConnPGDesc:Disconnect() nsConnPGDesc=nil end
-    if nsConnWSDesc then nsConnWSDesc:Disconnect() nsConnWSDesc=nil end
-    if nsCharAdded then nsCharAdded:Disconnect() nsCharAdded=nil end
+local function stopNoSkill()
+    if pgAddConn then pgAddConn:Disconnect() pgAddConn=nil end
+    if pgDescConn then pgDescConn:Disconnect() pgDescConn=nil end
+    if sgAddConn then sgAddConn:Disconnect() sgAddConn=nil end
+    if remAddConn then remAddConn:Disconnect() remAddConn=nil end
+    if rsAddConn then rsAddConn:Disconnect() rsAddConn=nil end
+    if wsAddConn then wsAddConn:Disconnect() wsAddConn=nil end
+    for pl,cn in pairs(charAddConns) do if cn then cn:Disconnect() end charAddConns[pl]=nil end
 end
 
 local miscSec = Tabs.Misc:AddSection("Skillcheck")
@@ -443,12 +485,7 @@ miscSec:AddToggle("NoSkill", {
     Default = false,
     Callback = function(s)
         noSkillEnabled = s
-        if s then
-            nukeSkillOnce()
-            connectNoSkill()
-        else
-            disconnectNoSkill()
-        end
+        if s then startNoSkill() else stopNoSkill() end
     end
 })
 
@@ -464,6 +501,23 @@ local initLighting = {
 
 local fullbrightEnabled = false
 local fbLoop
+local desiredClockTime = Lighting.ClockTime
+local timeLockActive = false
+
+local function bindTimeLock()
+    if timeLockActive then return end
+    timeLockActive = true
+    RunService:BindToRenderStep("VD_TimeLock", 299, function()
+        if Lighting.ClockTime ~= desiredClockTime then Lighting.ClockTime = desiredClockTime end
+    end)
+end
+
+local function unbindTimeLock()
+    if timeLockActive then
+        timeLockActive = false
+        pcall(function() RunService:UnbindFromRenderStep("VD_TimeLock") end)
+    end
+end
 
 local visSec = Tabs.Visual:AddSection("Lighting")
 visSec:AddToggle("Fullbright", { Title = "Fullbright", Default = false, Callback = function(s)
@@ -484,9 +538,14 @@ visSec:AddToggle("Fullbright", { Title = "Fullbright", Default = false, Callback
         end)
     else
         for k,v in pairs(initLighting) do pcall(function() Lighting[k]=v end) end
+        desiredClockTime = Lighting.ClockTime
     end
 end})
-visSec:AddSlider("TimeOfDay", { Title = "Time Of Day", Min = 0, Max = 24, Default = Lighting.ClockTime, Rounding = 1, Callback = function(v) Lighting.ClockTime = v end })
+visSec:AddSlider("TimeOfDay", { Title = "Time Of Day", Min = 0, Max = 24, Default = Lighting.ClockTime, Rounding = 1, Callback = function(v)
+    desiredClockTime = v
+    Lighting.ClockTime = v
+    bindTimeLock()
+end })
 
 local currentSpeed = 16
 local speedHumanoid = nil
@@ -594,5 +653,5 @@ InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
-Fluent:Notify({ Title = "Violence District", Content = "Loaded. made by JLCFG", Duration = 8 })
+Fluent:Notify({ Title = "Violence District", Content = "Loaded", Duration = 6 })
 Window:SelectTab(1)
