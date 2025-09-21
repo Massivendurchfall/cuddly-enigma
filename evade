@@ -1,15 +1,16 @@
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local SpeicherManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local LP = Players.LocalPlayer
+local SpielerService = game:GetService("Players")
+local LaufzeitService = game:GetService("RunService")
+local Arbeitsbereich = game:GetService("Workspace")
+local Replikat = game:GetService("ReplicatedStorage")
+local EingabeService = game:GetService("UserInputService")
+local VirtuelleEingabe = game:GetService("VirtualInputManager")
+local Ich = SpielerService.LocalPlayer
 
-local Window = Fluent:CreateWindow({
+local Fenster = Fluent:CreateWindow({
     Title = "Evade",
     SubTitle = "by jlcfg",
     TabWidth = 160,
@@ -19,14 +20,13 @@ local Window = Fluent:CreateWindow({
     MinimizeKey = Enum.KeyCode.LeftControl
 })
 
-local Tabs = {
-    Player = Window:AddTab({ Title = "Player", Icon = "user" }),
-    ESP = Window:AddTab({ Title = "ESP", Icon = "eye" }),
-    Automation = Window:AddTab({ Title = "Automation", Icon = "repeat" }),
-    Settings = Window:AddTab({ Title = "Settings", Icon = "sliders" })
+local Reiter = {
+    Spieler = Fenster:AddTab({ Title = "Spieler", Icon = "user" }),
+    ESP = Fenster:AddTab({ Title = "ESP", Icon = "eye" }),
+    Einstellungen = Fenster:AddTab({ Title = "Einstellungen", Icon = "sliders" })
 }
 
-local function makeBillboard(text, color3)
+local function erzeugeBillboard(text, farbe)
     local g = Instance.new("BillboardGui")
     g.Name = "EV_Tag"
     g.AlwaysOnTop = true
@@ -40,90 +40,84 @@ local function makeBillboard(text, color3)
     l.Font = Enum.Font.GothamBold
     l.Text = text
     l.TextSize = 14
-    l.TextColor3 = color3
+    l.TextColor3 = farbe
     l.TextStrokeTransparency = 0
     l.TextStrokeColor3 = Color3.new(0,0,0)
     l.Parent = g
     return g
 end
 
-local function clearBillboardOn(model)
-    if not model then return end
-    local hrp = model:FindFirstChild("HumanoidRootPart", true) or model:FindFirstChild("Head", true)
+local function entferneBillboard(amModell)
+    if not amModell then return end
+    local hrp = amModell:FindFirstChild("HumanoidRootPart", true) or amModell:FindFirstChild("Head", true)
     if hrp and hrp:FindFirstChild("EV_Tag") then hrp.EV_Tag:Destroy() end
 end
 
-local playerColor = Color3.fromRGB(0,255,0)
-local playerESPEnabled = false
-local playerNamesEnabled = false
+local spielerFarbe = Color3.fromRGB(0,255,0)
+local spielerNamenAn = false
 
-local function applyPlayerESP(p)
-    if p == LP then return end
+local function aktualisiereSpielerESP(p)
+    if p == Ich then return end
     local c = p.Character
     if not c then return end
-    local head = c:FindFirstChild("Head")
-    if playerESPEnabled and playerNamesEnabled and head then
-        if not head:FindFirstChild("EV_Tag") then
-            makeBillboard(p.Name, playerColor).Parent = head
+    local kopf = c:FindFirstChild("Head")
+    if spielerNamenAn and kopf then
+        if not kopf:FindFirstChild("EV_Tag") then
+            erzeugeBillboard(p.Name, spielerFarbe).Parent = kopf
         else
-            local l = head.EV_Tag:FindFirstChild("Label")
-            if l then l.Text = p.Name l.TextColor3 = playerColor end
+            local l = kopf.EV_Tag:FindFirstChild("Label")
+            if l then l.Text = p.Name l.TextColor3 = spielerFarbe end
         end
     else
-        if head and head:FindFirstChild("EV_Tag") then head.EV_Tag:Destroy() end
+        if kopf and kopf:FindFirstChild("EV_Tag") then kopf.EV_Tag:Destroy() end
     end
 end
 
-Players.PlayerAdded:Connect(function(p)
+SpielerService.PlayerAdded:Connect(function(p)
     p.CharacterAdded:Connect(function()
         task.wait(0.2)
-        applyPlayerESP(p)
+        aktualisiereSpielerESP(p)
     end)
 end)
 
-Players.PlayerRemoving:Connect(function(p)
-    if p.Character then clearBillboardOn(p.Character) end
+SpielerService.PlayerRemoving:Connect(function(p)
+    if p.Character then entferneBillboard(p.Character) end
 end)
 
-for _,pl in ipairs(Players:GetPlayers()) do
-    if pl.Character then applyPlayerESP(pl) end
+for _,pl in ipairs(SielerService and SpielerService:GetPlayers() or {}) do
+    if pl.Character then aktualisiereSpielerESP(pl) end
 end
 
-local secESPPlayers = Tabs.ESP:AddSection("Players")
-secESPPlayers:AddToggle("PlayersESP", { Title = "Enable Player Names", Default = false, Callback = function(s)
-    playerESPEnabled = s
-    for _,pl in ipairs(Players:GetPlayers()) do applyPlayerESP(pl) end
+local abschnittESPSpieler = Reiter.ESP:AddSection("Spieler")
+abschnittESPSpieler:AddToggle("SpielerNamen", { Title = "Namen anzeigen", Default = false, Callback = function(s)
+    spielerNamenAn = s
+    for _,pl in ipairs(SpielerService:GetPlayers()) do aktualisiereSpielerESP(pl) end
 end})
-secESPPlayers:AddToggle("PlayersNameOnly", { Title = "Show Names", Default = false, Callback = function(s)
-    playerNamesEnabled = s
-    for _,pl in ipairs(Players:GetPlayers()) do applyPlayerESP(pl) end
-end})
-secESPPlayers:AddColorpicker("PlayersColor", { Title = "Name Color", Default = playerColor, Callback = function(c)
-    playerColor = c
-    for _,pl in ipairs(Players:GetPlayers()) do applyPlayerESP(pl) end
+abschnittESPSpieler:AddColorpicker("SpielerFarbe", { Title = "Namensfarbe", Default = spielerFarbe, Callback = function(c)
+    spielerFarbe = c
+    for _,pl in ipairs(SpielerService:GetPlayers()) do aktualisiereSpielerESP(pl) end
 end})
 
-local enemyColor = Color3.fromRGB(255,0,0)
-local enemyESPEnabled = false
-local enemyNamesEnabled = false
-local enemyDistanceEnabled = false
-local enemyRegistry = {}
-local npcNameSet = {}
-local npcsFolder = ReplicatedStorage:FindFirstChild("NPCs")
+local gegnerFarbe = Color3.fromRGB(255,0,0)
+local gegnerNamenAn = false
+local gegnerDistanzAn = false
+local gegnerRegister = {}
+local npcNamenSet = {}
+local npcsOrdner = Replikat:FindFirstChild("NPCs")
 
-local function toKey(s) return tostring(s or ""):lower() end
-local function refreshNPCSet()
-    npcNameSet = {}
-    if npcsFolder then
-        for _,c in ipairs(npcsFolder:GetChildren()) do
-            npcNameSet[toKey(c.Name)] = true
+local function schluessel(s) return tostring(s or ""):lower() end
+local function auffrischenNPCSet()
+    npcNamenSet = {}
+    if npcsOrdner then
+        for _,c in ipairs(npcsOrdner:GetChildren()) do
+            npcNamenSet[schluessel(c.Name)] = true
         end
     end
 end
-local function isNPCName(n) return npcNameSet[toKey(n)] == true end
-local function isRealPlayerName(n) return Players:FindFirstChild(n) ~= nil end
+local function istNPCName(n) return npcNamenSet[schluessel(n)] == true end
+local function istEchterSpielerName(n) return SpielerService:FindFirstChild(n) ~= nil end
 
-local function targetPart(m)
+local function zielTeil(m)
     if not m or not m:IsA("Model") then return nil end
     if m:FindFirstChild("HumanoidRootPart", true) then return m:FindFirstChild("HumanoidRootPart", true) end
     if m.PrimaryPart and m.PrimaryPart:IsA("BasePart") then return m.PrimaryPart end
@@ -131,356 +125,206 @@ local function targetPart(m)
     return m:FindFirstChildWhichIsA("BasePart", true)
 end
 
-local function enemyLabel(m)
-    if not (enemyNamesEnabled or enemyDistanceEnabled) then return nil end
-    local namePart = enemyNamesEnabled and m.Name or ""
-    local distPart = ""
-    local t = targetPart(m)
-    if enemyDistanceEnabled and t and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") then
-        local d = (LP.Character.HumanoidRootPart.Position - t.Position).Magnitude
-        distPart = string.format("[%dm]", math.floor(d + 0.5))
+local function gegnerText(m)
+    if not (gegnerNamenAn or gegnerDistanzAn) then return nil end
+    local nameTeil = gegnerNamenAn and m.Name or ""
+    local distTeil = ""
+    local t = zielTeil(m)
+    if gegnerDistanzAn and t and Ich.Character and Ich.Character:FindFirstChild("HumanoidRootPart") then
+        local d = (Ich.Character.HumanoidRootPart.Position - t.Position).Magnitude
+        distTeil = string.format("[%dm]", math.floor(d + 0.5))
     end
-    if namePart ~= "" and distPart ~= "" then return namePart.." "..distPart end
-    if namePart ~= "" then return namePart end
-    if distPart ~= "" then return distPart end
+    if nameTeil ~= "" and distTeil ~= "" then return nameTeil.." "..distTeil end
+    if nameTeil ~= "" then return nameTeil end
+    if distTeil ~= "" then return distTeil end
     return nil
 end
 
-local function enemyOff(m)
-    clearBillboardOn(m)
+local function gegnerAus(m)
+    entferneBillboard(m)
 end
 
-local function enemyOn(m)
-    if not enemyESPEnabled then return end
+local function gegnerAn(m)
     if not m or not m.Parent then return end
-    local t = targetPart(m)
+    local t = zielTeil(m)
     if not t then return end
-    local txt = enemyLabel(m)
+    local txt = gegnerText(m)
     if txt then
         if not t:FindFirstChild("EV_Tag") then
-            makeBillboard(txt, enemyColor).Parent = t
+            erzeugeBillboard(txt, gegnerFarbe).Parent = t
         else
             local l = t.EV_Tag:FindFirstChild("Label")
-            if l then l.Text = txt l.TextColor3 = enemyColor end
+            if l then l.Text = txt l.TextColor3 = gegnerFarbe end
         end
     else
         if t:FindFirstChild("EV_Tag") then t.EV_Tag:Destroy() end
     end
 end
 
-local function registerEnemy(m)
-    if enemyRegistry[m] then return end
-    enemyRegistry[m] = true
-    enemyOn(m)
+local function registriereGegner(m)
+    if gegnerRegister[m] then return end
+    gegnerRegister[m] = true
+    gegnerAn(m)
 end
 
-local function removeEnemy(m)
-    if not enemyRegistry[m] then return end
-    enemyRegistry[m] = nil
-    enemyOff(m)
+local function entferneGegner(m)
+    if not gegnerRegister[m] then return end
+    gegnerRegister[m] = nil
+    gegnerAus(m)
 end
 
-local function checkModel(m)
+local function pruefeModell(m)
     if not m or not m:IsA("Model") then return end
-    if isRealPlayerName(m.Name) then return end
+    if istEchterSpielerName(m.Name) then return end
     if not m:FindFirstChildOfClass("Humanoid") then return end
-    if isNPCName(m.Name) then registerEnemy(m) end
+    if istNPCName(m.Name) then registriereGegner(m) end
 end
 
-refreshNPCSet()
-if npcsFolder then
-    npcsFolder.ChildAdded:Connect(refreshNPCSet)
-    npcsFolder.ChildRemoved:Connect(refreshNPCSet)
+auffrischenNPCSet()
+if npcsOrdner then
+    npcsOrdner.ChildAdded:Connect(auffrischenNPCSet)
+    npcsOrdner.ChildRemoved:Connect(auffrischenNPCSet)
 end
 
-for _,d in ipairs(Workspace:GetDescendants()) do
-    if d:IsA("Model") then checkModel(d) end
+for _,d in ipairs(Arbeitsbereich:GetDescendants()) do
+    if d:IsA("Model") then pruefeModell(d) end
 end
 
-Workspace.DescendantAdded:Connect(function(d)
-    if d:IsA("Model") then checkModel(d) end
+Arbeitsbereich.DescendantAdded:Connect(function(d)
+    if d:IsA("Model") then pruefeModell(d) end
 end)
 
-Workspace.DescendantRemoving:Connect(function(d)
-    if d:IsA("Model") and enemyRegistry[d] then removeEnemy(d) end
+Arbeitsbereich.DescendantRemoving:Connect(function(d)
+    if d:IsA("Model") and gegnerRegister[d] then entferneGegner(d) end
 end)
 
 task.spawn(function()
     while true do
-        for _,pl in ipairs(Players:GetPlayers()) do applyPlayerESP(pl) end
+        for _,pl in ipairs(SpielerService:GetPlayers()) do aktualisiereSpielerESP(pl) end
         task.wait(1)
     end
 end)
 
 task.spawn(function()
     while true do
-        for m,_ in pairs(enemyRegistry) do
-            if m and m.Parent then enemyOn(m) else removeEnemy(m) end
+        for m,_ in pairs(gegnerRegister) do
+            if m and m.Parent then gegnerAn(m) else entferneGegner(m) end
         end
-        for _,d in ipairs(Workspace:GetDescendants()) do
-            if d:IsA("Model") then checkModel(d) end
+        for _,d in ipairs(Arbeitsbereich:GetDescendants()) do
+            if d:IsA("Model") then pruefeModell(d) end
         end
         task.wait(1)
     end
 end)
 
-local walkspeedEnabled = false
-local walkspeed = 60
-local currentHumanoid = nil
-local wsConn = nil
+local gehGeschwAn = false
+local gehGeschw = 60
+local aktuellerHumanoid = nil
+local wsVerbindung = nil
 
-local function isGrounded(h, hrp)
+local function istAmBoden(h, hrp)
     if h and h.FloorMaterial ~= Enum.Material.Air then return true end
     if not hrp then return false end
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = {LP.Character}
-    local r = Workspace:Raycast(hrp.Position, Vector3.new(0, -3, 0), params)
+    local p = RaycastParams.new()
+    p.FilterType = Enum.RaycastFilterType.Exclude
+    p.FilterDescendantsInstances = {Ich.Character}
+    local r = Arbeitsbereich:Raycast(hrp.Position, Vector3.new(0, -3, 0), p)
     return r ~= nil
 end
 
-local function startWalkspeed()
-    if wsConn then return end
-    wsConn = RunService.RenderStepped:Connect(function(dt)
-        if not currentHumanoid or not currentHumanoid.Parent then return end
-        local char = currentHumanoid.Parent
+local function starteGeschwindigkeit()
+    if wsVerbindung then return end
+    wsVerbindung = LaufzeitService.RenderStepped:Connect(function()
+        if not aktuellerHumanoid or not aktuellerHumanoid.Parent then return end
+        local char = aktuellerHumanoid.Parent
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
-        local dir = currentHumanoid.MoveDirection
-        if walkspeedEnabled and dir.Magnitude > 0.05 and isGrounded(currentHumanoid, hrp) then
-            local unit = dir.Unit
-            local targetXZ = Vector3.new(unit.X*walkspeed, 0, unit.Z*walkspeed)
+        local dir = aktuellerHumanoid.MoveDirection
+        if gehGeschwAn and dir.Magnitude > 0.05 and istAmBoden(aktuellerHumanoid, hrp) then
+            local u = dir.Unit
+            local ziel = Vector3.new(u.X*gehGeschw, 0, u.Z*gehGeschw)
             local v = hrp.AssemblyLinearVelocity
-            hrp.AssemblyLinearVelocity = Vector3.new(targetXZ.X, v.Y, targetXZ.Z)
+            hrp.AssemblyLinearVelocity = Vector3.new(ziel.X, v.Y, ziel.Z)
         end
     end)
 end
 
-local function stopWalkspeed()
-    if wsConn then wsConn:Disconnect() wsConn = nil end
+local function stoppeGeschwindigkeit()
+    if wsVerbindung then wsVerbindung:Disconnect() wsVerbindung = nil end
 end
 
-local function onHumanoid(h) currentHumanoid = h end
-local function onCharacter(char)
+local function beiHumanoid(h) aktuellerHumanoid = h end
+local function beiCharakter(char)
     local h = char:WaitForChild("Humanoid", 10) or char:FindFirstChildOfClass("Humanoid")
-    if h then onHumanoid(h) end
-    char.ChildAdded:Connect(function(ch) if ch:IsA("Humanoid") then onHumanoid(ch) end end)
+    if h then beiHumanoid(h) end
+    char.ChildAdded:Connect(function(ch) if ch:IsA("Humanoid") then beiHumanoid(ch) end end)
 end
-if LP.Character then onCharacter(LP.Character) end
-LP.CharacterAdded:Connect(onCharacter)
+if Ich.Character then beiCharakter(Ich.Character) end
+SpielerService.LocalPlayer.CharacterAdded:Connect(beiCharakter)
 
-local secPlayer = Tabs.Player:AddSection("Movement")
-secPlayer:AddToggle("EnableWS", { Title = "Enable Walkspeed", Default = false, Callback = function(s)
-    walkspeedEnabled = s
-    if s then startWalkspeed() else stopWalkspeed() end
-end})
-secPlayer:AddSlider("WSSpeed", { Title = "Speed", Min = 0, Max = 200, Default = 60, Rounding = 0, Callback = function(v)
-    walkspeed = v
-end})
-secPlayer:AddButton({ Title = "Reset", Callback = function()
-    walkspeed = 60
-end})
+local bhopAktiv = false
+local leerGedrueckt = false
 
-local autoReviveEnabled = false
-local reviveHoldSeconds = 5
-local reviveQueue = {}
-local processingRevive = false
-
-local function setNoCollide(char, state)
-    for _,p in ipairs(char:GetDescendants()) do
-        if p:IsA("BasePart") then
-            p.CanCollide = not state and true or false
-        end
+EingabeService.InputBegan:Connect(function(eingabe, gp)
+    if gp then return end
+    if eingabe.KeyCode == Enum.KeyCode.Space then
+        leerGedrueckt = true
     end
-end
+end)
 
-local function pressE(seconds)
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-    task.wait(seconds)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-end
-
-local function findRevivePrompt(target)
-    for _,pp in ipairs(target:GetDescendants()) do
-        if pp:IsA("ProximityPrompt") then
-            return pp
-        end
+EingabeService.InputEnded:Connect(function(eingabe, gp)
+    if gp then return end
+    if eingabe.KeyCode == Enum.KeyCode.Space then
+        leerGedrueckt = false
     end
-    return nil
-end
+end)
 
-local function groundAt(pos, ignore)
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = ignore
-    local r = Workspace:Raycast(pos + Vector3.new(0, 10, 0), Vector3.new(0, -100, 0), params)
-    if r then
-        return Vector3.new(pos.X, r.Position.Y, pos.Z)
-    else
-        return pos
-    end
-end
-
-local function isFreeCF(cf, hrpSize, ignore)
-    local extents = (hrpSize or Vector3.new(2,2,1)) + Vector3.new(0.25, 0.25, 0.25)
-    local params = OverlapParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = ignore
-    local parts = Workspace:GetPartBoundsInBox(cf, extents, params)
-    for _,p in ipairs(parts) do
-        if p.CanCollide and p.Transparency < 1 and p.Parent ~= LP.Character then
-            return false
-        end
-    end
-    return true
-end
-
-local function findSafeSpot(targetModel)
-    local char = LP.Character
-    if not char then return nil end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    local thrp = targetModel and (targetModel:FindFirstChild("HumanoidRootPart") or targetModel:FindFirstChild("Head"))
-    if not hrp or not thrp then return nil end
-    local ignore = {char, targetModel}
-    local hrpSize = hrp.Size
-    local offsets = {}
-    for _,r in ipairs({2.5, 3.5, 5, 6.5}) do
-        table.insert(offsets, Vector3.new(0, -1.6, -r))
-        table.insert(offsets, Vector3.new(0, -1.6, r))
-        table.insert(offsets, Vector3.new(r, -1.6, 0))
-        table.insert(offsets, Vector3.new(-r, -1.6, 0))
-        table.insert(offsets, Vector3.new(r, -1.6, r))
-        table.insert(offsets, Vector3.new(-r, -1.6, r))
-        table.insert(offsets, Vector3.new(r, -1.6, -r))
-        table.insert(offsets, Vector3.new(-r, -1.6, -r))
-    end
-    for _,off in ipairs(offsets) do
-        local base = thrp.CFrame * CFrame.new(off)
-        local gpos = groundAt(base.Position, ignore) + Vector3.new(0, 2, 0)
-        local cf = CFrame.new(gpos, thrp.Position)
-        if isFreeCF(cf, hrpSize, ignore) then
-            return cf
-        end
-    end
-    local fallback = groundAt(thrp.Position + Vector3.new(0, 0, -3), ignore) + Vector3.new(0, 2, 0)
-    return CFrame.new(fallback, thrp.Position)
-end
-
-local function doReviveOnce(targetModel)
-    if not autoReviveEnabled then return end
-    local char = LP.Character
+LaufzeitService.RenderStepped:Connect(function()
+    if not bhopAktiv then return end
+    local char = Ich.Character
     if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    local original = hrp.CFrame
-    local safeCF = findSafeSpot(targetModel)
-    if not safeCF then return end
-    setNoCollide(char, true)
-    hrp.AssemblyLinearVelocity = Vector3.new()
-    hrp.CFrame = safeCF
-    local prompt = findRevivePrompt(targetModel)
-    if prompt and fireproximityprompt then
-        pcall(function()
-            local old = prompt.HoldDuration
-            prompt.HoldDuration = math.max(reviveHoldSeconds, old)
-            fireproximityprompt(prompt, 1)
-            task.wait(reviveHoldSeconds + 0.1)
-            prompt.HoldDuration = old
-        end)
-    else
-        pressE(reviveHoldSeconds)
+    local h = char:FindFirstChildOfClass("Humanoid")
+    if not h then return end
+    if leerGedrueckt and h.FloorMaterial ~= Enum.Material.Air then
+        h.Jump = true
     end
-    hrp.CFrame = original
-    setNoCollide(char, false)
-end
+end)
 
-local function processRevives()
-    if processingRevive then return end
-    processingRevive = true
-    while autoReviveEnabled do
-        local item = table.remove(reviveQueue, 1)
-        if item and item.Parent then
-            doReviveOnce(item)
-        else
-            task.wait(0.1)
-        end
-    end
-    processingRevive = false
-end
-
-local function enqueueRevive(targetModel)
-    table.insert(reviveQueue, targetModel)
-    processRevives()
-end
-
-local function hookPlayersRevivesFolder(root)
-    root.ChildAdded:Connect(function(ch)
-        if ch:IsA("Model") then
-            ch.ChildAdded:Connect(function(x)
-                if autoReviveEnabled and x.Name == "Revives" then enqueueRevive(ch) end
-            end)
-            if ch:FindFirstChild("Revives") then enqueueRevive(ch) end
-        end
-    end)
-    for _,m in ipairs(root:GetChildren()) do
-        if m:IsA("Model") then
-            m.ChildAdded:Connect(function(x)
-                if autoReviveEnabled and x.Name == "Revives" then enqueueRevive(m) end
-            end)
-            if m:FindFirstChild("Revives") then enqueueRevive(m) end
-        end
-    end
-end
-
-local function attachReviveWatchers()
-    local gameFolder = Workspace:FindFirstChild("Game")
-    local playersFolder = gameFolder and gameFolder:FindFirstChild("Players") or nil
-    if playersFolder then hookPlayersRevivesFolder(playersFolder) end
-    Workspace.DescendantAdded:Connect(function(d)
-        if d:IsA("Folder") and d.Name == "Players" and d.Parent == (Workspace:FindFirstChild("Game") or nil) then
-            hookPlayersRevivesFolder(d)
-        end
-    end)
-end
-
-attachReviveWatchers()
-
-local secEnemy = Tabs.ESP:AddSection("Nextbots")
-secEnemy:AddToggle("EnemyESP", { Title = "Enable Nextbots ESP", Default = false, Callback = function(s)
-    enemyESPEnabled = s
-    if not s then for m,_ in pairs(enemyRegistry) do enemyOff(m) end end
+local abschnittSpieler = Reiter.Spieler:AddSection("Bewegung")
+abschnittSpieler:AddToggle("GeschwindigkeitAn", { Title = "Laufgeschwindigkeit aktivieren", Default = false, Callback = function(s)
+    gehGeschwAn = s
+    if s then starteGeschwindigkeit() else stoppeGeschwindigkeit() end
 end})
-secEnemy:AddToggle("EnemyNames", { Title = "Show Names", Default = false, Callback = function(s)
-    enemyNamesEnabled = s
+abschnittSpieler:AddSlider("GeschwindigkeitWert", { Title = "Geschwindigkeit", Min = 0, Max = 200, Default = 60, Rounding = 0, Callback = function(v)
+    gehGeschw = v
 end})
-secEnemy:AddToggle("EnemyDist", { Title = "Show Distance", Default = false, Callback = function(s)
-    enemyDistanceEnabled = s
+abschnittSpieler:AddButton({ Title = "Zurücksetzen", Callback = function()
+    gehGeschw = 60
 end})
-secEnemy:AddColorpicker("EnemyColor", { Title = "Tag Color", Default = enemyColor, Callback = function(c)
-    enemyColor = c
+abschnittSpieler:AddToggle("BHop", { Title = "Bunnyhop bei Leertaste", Default = false, Callback = function(s)
+    bhopAktiv = s
 end})
 
-local secAuto = Tabs.Automation:AddSection("Auto Revive")
-secAuto:AddToggle("AutoRevive", { Title = "Enable Auto Revive", Default = false, Callback = function(s)
-    autoReviveEnabled = s
-    if s then processRevives() end
+local abschnittESPNext = Reiter.ESP:AddSection("Nextbots")
+abschnittESPNext:AddToggle("NextbotNamen", { Title = "Namen anzeigen", Default = false, Callback = function(s)
+    gegnerNamenAn = s
 end})
-secAuto:AddSlider("HoldTime", { Title = "Hold Seconds", Min = 1, Max = 8, Default = 5, Rounding = 0, Callback = function(v)
-    reviveHoldSeconds = v
+abschnittESPNext:AddToggle("NextbotDistanz", { Title = "Distanz anzeigen", Default = false, Callback = function(s)
+    gegnerDistanzAn = s
 end})
-secAuto:AddButton({ Title = "Clear Queue", Callback = function()
-    reviveQueue = {}
+abschnittESPNext:AddColorpicker("NextbotFarbe", { Title = "Tag-Farbe", Default = gegnerFarbe, Callback = function(c)
+    gegnerFarbe = c
 end})
 
-SaveManager:SetLibrary(Fluent)
+SpeicherManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({})
+SpeicherManager:IgnoreThemeSettings()
+SpeicherManager:SetIgnoreIndexes({})
 InterfaceManager:SetFolder("Evade_Suite")
-SaveManager:SetFolder("Evade_Suite/config")
-InterfaceManager:BuildInterfaceSection(Tabs.Settings)
-SaveManager:BuildConfigSection(Tabs.Settings)
-SaveManager:LoadAutoloadConfig()
+SpeicherManager:SetFolder("Evade_Suite/config")
+InterfaceManager:BuildInterfaceSection(Reiter.Einstellungen)
+SpeicherManager:BuildConfigSection(Reiter.Einstellungen)
+SpeicherManager:LoadAutoloadConfig()
 
-Fluent:Notify({ Title = "Evade", Content = "Loaded", Duration = 5 })
-Window:SelectTab(1)
+Fluent:Notify({ Title = "Evade", Content = "Geladen", Duration = 5 })
+Fenster:SelectTab(1)
