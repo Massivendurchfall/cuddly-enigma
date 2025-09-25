@@ -10,6 +10,17 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
 local LP = Players.LocalPlayer
 
+local function alive(i)
+    if not i then return false end
+    local ok = pcall(function() return i.Parent end)
+    if not ok then return false end
+    return i.Parent ~= nil
+end
+
+local function validPart(p)
+    return p and alive(p) and p:IsA("BasePart")
+end
+
 local Window = Fluent:CreateWindow({
     Title = "Violence District",
     SubTitle = "by jlcfg",
@@ -30,11 +41,12 @@ local Tabs = {
 }
 
 local function firstBasePart(inst)
-    if not inst then return nil end
+    if not alive(inst) then return nil end
     if inst:IsA("BasePart") then return inst end
     if inst:IsA("Model") then
-        if inst.PrimaryPart and inst.PrimaryPart:IsA("BasePart") then return inst.PrimaryPart end
-        return inst:FindFirstChildWhichIsA("BasePart", true)
+        if inst.PrimaryPart and inst.PrimaryPart:IsA("BasePart") and alive(inst.PrimaryPart) then return inst.PrimaryPart end
+        local p = inst:FindFirstChildWhichIsA("BasePart", true)
+        if validPart(p) then return p end
     end
     return nil
 end
@@ -60,18 +72,23 @@ local function makeBillboard(text, color3)
 end
 
 local function ensureBoxESP(part, name, color)
-    if not part or not part.Parent then return end
+    if not validPart(part) then return end
     local esp = part:FindFirstChild(name)
     if not esp then
-        esp = Instance.new("BoxHandleAdornment")
-        esp.Name = name
-        esp.Adornee = part
-        esp.ZIndex = 10
-        esp.AlwaysOnTop = true
-        esp.Transparency = 0.5
-        esp.Size = part.Size + Vector3.new(0.2,0.2,0.2)
-        esp.Color3 = color
-        esp.Parent = part
+        local ok, obj = pcall(function()
+            local a = Instance.new("BoxHandleAdornment")
+            a.Name = name
+            a.Adornee = part
+            a.ZIndex = 10
+            a.AlwaysOnTop = true
+            a.Transparency = 0.5
+            a.Size = part.Size + Vector3.new(0.2,0.2,0.2)
+            a.Color3 = color
+            a.Parent = part
+            return a
+        end)
+        if not ok then return end
+        esp = obj
     else
         esp.Color3 = color
         esp.Size = part.Size + Vector3.new(0.2,0.2,0.2)
@@ -79,19 +96,27 @@ local function ensureBoxESP(part, name, color)
 end
 
 local function clearChild(o, n)
-    if o and o.Parent and o:FindFirstChild(n) then o[n]:Destroy() end
+    if o and alive(o) then
+        local c = o:FindFirstChild(n)
+        if c then pcall(function() c:Destroy() end) end
+    end
 end
 
 local function ensureHighlight(model, fill)
-    if not model then return end
+    if not model or not model:IsA("Model") or not alive(model) then return end
     local hl = model:FindFirstChild("VD_HL")
     if not hl then
-        hl = Instance.new("Highlight")
-        hl.Name = "VD_HL"
-        hl.Adornee = model
-        hl.FillTransparency = 0.5
-        hl.OutlineTransparency = 0
-        hl.Parent = model
+        local ok, obj = pcall(function()
+            local h = Instance.new("Highlight")
+            h.Name = "VD_HL"
+            h.Adornee = model
+            h.FillTransparency = 0.5
+            h.OutlineTransparency = 0
+            h.Parent = model
+            return h
+        end)
+        if not ok then return end
+        hl = obj
     end
     hl.FillColor = fill
     hl.OutlineColor = fill
@@ -99,7 +124,7 @@ local function ensureHighlight(model, fill)
 end
 
 local function clearHighlight(model)
-    if model and model:FindFirstChild("VD_HL") then model.VD_HL:Destroy() end
+    if model and model:FindFirstChild("VD_HL") then pcall(function() model.VD_HL:Destroy() end) end
 end
 
 local survivorColor = Color3.fromRGB(0,255,0)
@@ -120,34 +145,36 @@ end
 local function applyPlayerESP(p)
     if p == LP then return end
     local c = p.Character
-    if not c then return end
+    if not c or not alive(c) then return end
     local role = getRole(p)
     local col = role == "Killer" and killerColor or survivorColor
     if playerESPEnabled then
-        ensureHighlight(c, col)
+        if c:IsDescendantOf(Workspace) then ensureHighlight(c, col) end
         local head = c:FindFirstChild("Head")
-        if nametagsEnabled and head then
+        if nametagsEnabled and validPart(head) then
             if not head:FindFirstChild("VD_Tag") then
                 local b = makeBillboard(p.Name, col)
-                b.Parent = head
+                if alive(head) then b.Parent = head end
             else
                 local l = head.VD_Tag:FindFirstChild("Label")
                 if l then l.Text = p.Name l.TextColor3 = col end
             end
         elseif head and head:FindFirstChild("VD_Tag") then
-            head.VD_Tag:Destroy()
+            pcall(function() head.VD_Tag:Destroy() end)
         end
     else
         clearHighlight(c)
         local head = c:FindFirstChild("Head")
-        if head and head:FindFirstChild("VD_Tag") then head.VD_Tag:Destroy() end
+        if head and head:FindFirstChild("VD_Tag") then pcall(function() head.VD_Tag:Destroy() end) end
     end
 end
 
 local function watchPlayer(p)
     if playerConns[p] then for _,cn in ipairs(playerConns[p]) do cn:Disconnect() end end
     playerConns[p] = {}
-    table.insert(playerConns[p], p.CharacterAdded:Connect(function() task.wait(0.1) applyPlayerESP(p) end))
+    table.insert(playerConns[p], p.CharacterAdded:Connect(function()
+        task.delay(0.15, function() applyPlayerESP(p) end)
+    end))
     table.insert(playerConns[p], p:GetPropertyChangedSignal("Team"):Connect(function() applyPlayerESP(p) end))
     if p.Character then applyPlayerESP(p) end
 end
@@ -156,7 +183,7 @@ local function unwatchPlayer(p)
     if p.Character then
         clearHighlight(p.Character)
         local head = p.Character:FindFirstChild("Head")
-        if head and head:FindFirstChild("VD_Tag") then head.VD_Tag:Destroy() end
+        if head and head:FindFirstChild("VD_Tag") then pcall(function() head.VD_Tag:Destroy() end) end
     end
     if playerConns[p] then for _,cn in ipairs(playerConns[p]) do cn:Disconnect() end end
     playerConns[p] = nil
@@ -198,33 +225,34 @@ local worldEnabled = {
     Window = false,
     Palletwrong = false
 }
-
 local validCats = {Generator=true,Hook=true,Gate=true,Window=true,Palletwrong=true}
 local worldReg = {Generator={},Hook={},Gate={},Window={},Palletwrong={}}
 local mapAdd, mapRem = {}, {}
+local worldLoopThread = nil
 
 local function pickRep(model, cat)
-    if not model then return nil end
+    if not model or not alive(model) then return nil end
     if cat == "Generator" then
         local hb = model:FindFirstChild("HitBox", true)
-        if hb and hb:IsA("BasePart") then return hb end
+        if validPart(hb) then return hb end
     elseif cat == "Palletwrong" then
         local a = model:FindFirstChild("HumanoidRootPart", true)
-        if a and a:IsA("BasePart") then return a end
+        if validPart(a) then return a end
         local b = model:FindFirstChild("PrimaryPartPallet", true)
-        if b and b:IsA("BasePart") then return b end
+        if validPart(b) then return b end
         local c = model:FindFirstChild("Primary1", true)
-        if c and c:IsA("BasePart") then return c end
+        if validPart(c) then return c end
         local d = model:FindFirstChild("Primary2", true)
-        if d and d:IsA("BasePart") then return d end
+        if validPart(d) then return d end
     end
     return firstBasePart(model)
 end
 
 local function ensureWorldEntry(cat, model)
+    if not alive(model) then return end
     if worldReg[cat][model] then return end
     local rep = pickRep(model, cat)
-    if not rep then return end
+    if not validPart(rep) then return end
     worldReg[cat][model] = {part = rep}
 end
 
@@ -238,6 +266,7 @@ local function removeWorldEntry(cat, model)
 end
 
 local function registerFromDescendant(obj)
+    if not alive(obj) then return end
     if obj:IsA("Model") and validCats[obj.Name] then
         ensureWorldEntry(obj.Name, obj)
         return
@@ -248,6 +277,7 @@ local function registerFromDescendant(obj)
 end
 
 local function unregisterFromDescendant(obj)
+    if not obj then return end
     if obj:IsA("Model") and validCats[obj.Name] then
         removeWorldEntry(obj.Name, obj)
         return
@@ -276,57 +306,84 @@ local function refreshRoots()
     if r2 then attachRoot(r2) end
 end
 
+local function clearCategory(cat)
+    for _,entry in pairs(worldReg[cat]) do
+        if entry and entry.part then
+            clearChild(entry.part, "VD_"..cat)
+            clearChild(entry.part, "VD_Text_"..cat)
+        end
+    end
+end
+
+local function anyWorldEnabled()
+    for _,v in pairs(worldEnabled) do if v then return true end end
+    return false
+end
+
+local function startWorldLoop()
+    if worldLoopThread then return end
+    worldLoopThread = task.spawn(function()
+        while anyWorldEnabled() do
+            for cat,models in pairs(worldReg) do
+                if worldEnabled[cat] then
+                    local col = worldColors[cat]
+                    local tagName = "VD_"..cat
+                    local textName = "VD_Text_"..cat
+                    local labelText = cat == "Palletwrong" and "Pallet" or cat
+                    local n = 0
+                    for model,entry in pairs(models) do
+                        local part = entry.part
+                        if model and alive(model) then
+                            if not validPart(part) or not part:IsDescendantOf(model) then
+                                entry.part = pickRep(model, cat)
+                                part = entry.part
+                            end
+                            if validPart(part) then
+                                ensureBoxESP(part, tagName, col)
+                                local bb = part:FindFirstChild(textName)
+                                if not bb then
+                                    local newbb = makeBillboard(labelText, col)
+                                    newbb.Name = textName
+                                    if alive(part) then newbb.Parent = part end
+                                else
+                                    local lbl = bb:FindFirstChild("Label")
+                                    if lbl then lbl.Text = labelText lbl.TextColor3 = col end
+                                end
+                            end
+                        else
+                            removeWorldEntry(cat, model)
+                        end
+                        n += 1
+                        if n % 50 == 0 then task.wait() end
+                    end
+                end
+            end
+            task.wait(0.25)
+        end
+        worldLoopThread = nil
+    end)
+end
+
+local function setWorldToggle(cat, state)
+    worldEnabled[cat] = state
+    if state then
+        if not worldLoopThread then startWorldLoop() end
+    else
+        clearCategory(cat)
+    end
+end
+
 refreshRoots()
 Workspace.ChildAdded:Connect(function(ch)
     if ch.Name == "Map" or ch.Name == "Map1" then attachRoot(ch) end
 end)
 
-RunService.Heartbeat:Connect(function()
-    for cat,models in pairs(worldReg) do
-        if worldEnabled[cat] then
-            local col = worldColors[cat]
-            local tagName = "VD_"..cat
-            local textName = "VD_Text_"..cat
-            local labelText = cat == "Palletwrong" and "Pallet" or cat
-            for model,entry in pairs(models) do
-                local part = entry.part
-                if model and model.Parent and part and part.Parent then
-                    if not part:IsDescendantOf(model) then
-                        entry.part = pickRep(model, cat)
-                        part = entry.part
-                    end
-                    if part then
-                        ensureBoxESP(part, tagName, col)
-                        if not part:FindFirstChild(textName) then
-                            local bb = makeBillboard(labelText, col)
-                            bb.Name = textName
-                            bb.Parent = part
-                        else
-                            local lbl = part[textName]:FindFirstChild("Label")
-                            if lbl then lbl.Text = labelText lbl.TextColor3 = col end
-                        end
-                    end
-                else
-                    removeWorldEntry(cat, model)
-                end
-            end
-        else
-            for _,entry in pairs(models) do
-                if entry.part then
-                    clearChild(entry.part, "VD_"..cat)
-                    clearChild(entry.part, "VD_Text_"..cat)
-                end
-            end
-        end
-    end
-end)
-
 local worldSec = Tabs.World:AddSection("Toggles")
-worldSec:AddToggle("Gen", { Title = "Generators", Default = false, Callback = function(s) worldEnabled.Generator = s end })
-worldSec:AddToggle("Hook", { Title = "Hooks", Default = false, Callback = function(s) worldEnabled.Hook = s end })
-worldSec:AddToggle("Gate", { Title = "Gates", Default = false, Callback = function(s) worldEnabled.Gate = s end })
-worldSec:AddToggle("Window", { Title = "Windows", Default = false, Callback = function(s) worldEnabled.Window = s end })
-worldSec:AddToggle("Pallet", { Title = "Pallets", Default = false, Callback = function(s) worldEnabled.Palletwrong = s end })
+worldSec:AddToggle("Gen", { Title = "Generators", Default = false, Callback = function(s) setWorldToggle("Generator", s) end })
+worldSec:AddToggle("Hook", { Title = "Hooks", Default = false, Callback = function(s) setWorldToggle("Hook", s) end })
+worldSec:AddToggle("Gate", { Title = "Gates", Default = false, Callback = function(s) setWorldToggle("Gate", s) end })
+worldSec:AddToggle("Window", { Title = "Windows", Default = false, Callback = function(s) setWorldToggle("Window", s) end })
+worldSec:AddToggle("Pallet", { Title = "Pallets", Default = false, Callback = function(s) setWorldToggle("Palletwrong", s) end })
 
 local worldCol = Tabs.World:AddSection("Colors")
 worldCol:AddColorpicker("GenCol", { Title = "Generators", Default = worldColors.Generator, Callback = function(c) worldColors.Generator = c end })
@@ -335,13 +392,51 @@ worldCol:AddColorpicker("GateCol", { Title = "Gates", Default = worldColors.Gate
 worldCol:AddColorpicker("WinCol", { Title = "Windows", Default = worldColors.Window, Callback = function(c) worldColors.Window = c end })
 worldCol:AddColorpicker("PalCol", { Title = "Pallets", Default = worldColors.Palletwrong, Callback = function(c) worldColors.Palletwrong = c end })
 
-local function textMatchAny(s, words)
-    s = tostring(s or ""):lower()
-    for _,w in ipairs(words) do
-        if s:find(w, 1, true) then return true end
-    end
-    return false
+local function isExactPalletStunRemote(inst)
+    if not inst or not inst:IsA("RemoteEvent") then return false end
+    local name = inst.Name
+    if name ~= "Stun" and name ~= "Stunover" then return false end
+    local full = ""
+    pcall(function() full = inst:GetFullName():lower() end)
+    if full == "" then return false end
+    if not full:find("replicatedstorage.remotes.pallet.", 1, true) then return false end
+    return true
 end
+
+local function purgeOnlyPalletStuns()
+    if not LP.Team or LP.Team.Name ~= "Killer" then return end
+    local root = ReplicatedStorage:FindFirstChild("Remotes")
+    if not root then return end
+    for _,d in ipairs(root:GetDescendants()) do
+        if d:IsA("RemoteEvent") and isExactPalletStunRemote(d) then
+            pcall(function() d:Destroy() end)
+        end
+    end
+end
+
+local stunWatcher
+local function bindPalletStunWatcher()
+    if stunWatcher then stunWatcher:Disconnect() stunWatcher = nil end
+    local root = ReplicatedStorage:FindFirstChild("Remotes")
+    if not root then return end
+    stunWatcher = root.DescendantAdded:Connect(function(d)
+        if LP.Team and LP.Team.Name == "Killer" then
+            if d:IsA("RemoteEvent") and isExactPalletStunRemote(d) then
+                pcall(function() d:Destroy() end)
+            end
+        end
+    end)
+end
+
+Players.LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+    purgeOnlyPalletStuns()
+    bindPalletStunWatcher()
+end)
+
+task.spawn(function()
+    purgeOnlyPalletStuns()
+    bindPalletStunWatcher()
+end)
 
 local guiWhitelist = {
     ["Fluent"] = true,
@@ -401,12 +496,12 @@ local function nukeSkillExactOnce()
 end
 
 local noSkillEnabled = false
-local hookInstalled = false
+local hookSkillInstalled = false
 local rsAddConn, pgAddConn, pgDescConn, sgAddConn, remAddConn, wsAddConn
 local charAddConns = {}
 
-local function installNamecallBlock()
-    if hookInstalled then return end
+local function installSkillBlock()
+    if hookSkillInstalled then return end
     if typeof(hookmetamethod)=="function" and typeof(getnamecallmethod)=="function" then
         local old
         old = hookmetamethod(game, "__namecall", function(self, ...)
@@ -416,12 +511,12 @@ local function installNamecallBlock()
             end
             return old(self, ...)
         end)
-        hookInstalled = true
+        hookSkillInstalled = true
     end
 end
 
 local function startNoSkill()
-    installNamecallBlock()
+    installSkillBlock()
     nukeSkillExactOnce()
     local pg = LP:FindFirstChild("PlayerGui")
     if pg then
@@ -654,4 +749,4 @@ SaveManager:BuildConfigSection(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
 Fluent:Notify({ Title = "Violence District", Content = "Loaded", Duration = 6 })
-Window:SelectTab(1)
+Window:SelectTab(3)
