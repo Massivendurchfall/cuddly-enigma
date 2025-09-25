@@ -736,4 +736,5 @@ SaveManager:BuildConfigSection(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
 Fluent:Notify({ Title = "Violence District", Content = "Loaded", Duration = 6 })
+Fluent:Notify({ Title = "Warning", Content = "Don't get stunned — this may freeze your game.", Duration = 8 })
 Window:SelectTab(3)
