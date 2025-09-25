@@ -218,13 +218,7 @@ local worldColors = {
     Window = Color3.fromRGB(255,255,255),
     Palletwrong = Color3.fromRGB(255,140,0)
 }
-local worldEnabled = {
-    Generator = false,
-    Hook = false,
-    Gate = false,
-    Window = false,
-    Palletwrong = false
-}
+local worldEnabled = {Generator=false,Hook=false,Gate=false,Window=false,Palletwrong=false}
 local validCats = {Generator=true,Hook=true,Gate=true,Window=true,Palletwrong=true}
 local worldReg = {Generator={},Hook={},Gate={},Window={},Palletwrong={}}
 local mapAdd, mapRem = {}, {}
@@ -392,50 +386,45 @@ worldCol:AddColorpicker("GateCol", { Title = "Gates", Default = worldColors.Gate
 worldCol:AddColorpicker("WinCol", { Title = "Windows", Default = worldColors.Window, Callback = function(c) worldColors.Window = c end })
 worldCol:AddColorpicker("PalCol", { Title = "Pallets", Default = worldColors.Palletwrong, Callback = function(c) worldColors.Palletwrong = c end })
 
+local function hasAncestorNamed(instance, target)
+    local p = instance and instance.Parent
+    while p do
+        if p.Name == target then return true end
+        p = p.Parent
+    end
+    return false
+end
+
 local function isExactPalletStunRemote(inst)
     if not inst or not inst:IsA("RemoteEvent") then return false end
-    local name = inst.Name
-    if name ~= "Stun" and name ~= "Stunover" then return false end
-    local full = ""
-    pcall(function() full = inst:GetFullName():lower() end)
-    if full == "" then return false end
-    if not full:find("replicatedstorage.remotes.pallet.", 1, true) then return false end
+    local n = inst.Name
+    if n ~= "Stun" and n ~= "Stunover" then return false end
+    if not hasAncestorNamed(inst, "Pallet") then return false end
+    if not hasAncestorNamed(inst, "Remotes") then return false end
+    if not inst:IsDescendantOf(ReplicatedStorage) then return false end
     return true
 end
 
-local function purgeOnlyPalletStuns()
-    if not LP.Team or LP.Team.Name ~= "Killer" then return end
-    local root = ReplicatedStorage:FindFirstChild("Remotes")
-    if not root then return end
-    for _,d in ipairs(root:GetDescendants()) do
-        if d:IsA("RemoteEvent") and isExactPalletStunRemote(d) then
-            pcall(function() d:Destroy() end)
-        end
+local stunHookInstalled = false
+local function installNonDestructiveStunHook()
+    if stunHookInstalled then return end
+    if typeof(hookmetamethod) == "function" and typeof(getnamecallmethod) == "function" then
+        local old
+        old = hookmetamethod(game, "__namecall", function(self, ...)
+            local m = getnamecallmethod()
+            if LP.Team and LP.Team.Name == "Killer" then
+                if m == "FireServer" and typeof(self) == "Instance" and isExactPalletStunRemote(self) then
+                    return nil
+                end
+            end
+            return old(self, ...)
+        end)
+        stunHookInstalled = true
     end
 end
 
-local stunWatcher
-local function bindPalletStunWatcher()
-    if stunWatcher then stunWatcher:Disconnect() stunWatcher = nil end
-    local root = ReplicatedStorage:FindFirstChild("Remotes")
-    if not root then return end
-    stunWatcher = root.DescendantAdded:Connect(function(d)
-        if LP.Team and LP.Team.Name == "Killer" then
-            if d:IsA("RemoteEvent") and isExactPalletStunRemote(d) then
-                pcall(function() d:Destroy() end)
-            end
-        end
-    end)
-end
-
-Players.LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
-    purgeOnlyPalletStuns()
-    bindPalletStunWatcher()
-end)
-
 task.spawn(function()
-    purgeOnlyPalletStuns()
-    bindPalletStunWatcher()
+    installNonDestructiveStunHook()
 end)
 
 local guiWhitelist = {
