@@ -210,7 +210,6 @@ end})
 for _,p in ipairs(Players:GetPlayers()) do if p ~= LP then watchPlayer(p) end end
 Players.PlayerAdded:Connect(watchPlayer)
 Players.PlayerRemoving:Connect(unwatchPlayer)
-
 local worldColors = {
     Generator = Color3.fromRGB(0,170,255),
     Hook = Color3.fromRGB(255,0,0),
@@ -426,7 +425,6 @@ end
 task.spawn(function()
     installNonDestructiveStunHook()
 end)
-
 local guiWhitelist = {
     ["Fluent"] = true,
     ["DevConsoleMaster"] = true,
