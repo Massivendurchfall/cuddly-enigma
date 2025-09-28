@@ -1,4 +1,5 @@
-local Rayfield = loadstring(game:HttpGet("https://raw.githubusercontent.com/shlexware/Rayfield/main/source"))()
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -35,7 +36,6 @@ local TabESP = Window:CreateTab("ESP")
 local TabWorld = Window:CreateTab("World")
 local TabMisc = Window:CreateTab("Misc")
 local TabVisual = Window:CreateTab("Visual")
-local TabSettings = Window:CreateTab("Settings")
 
 local function firstBasePart(inst)
     if not alive(inst) then return nil end
@@ -186,7 +186,7 @@ local function unwatchPlayer(p)
     playerConns[p] = nil
 end
 
-local SecPlayers = TabESP:CreateSection("Players")
+TabESP:CreateSection("Players")
 
 TabESP:CreateToggle({
     Name = "Player ESP (Chams)",
@@ -368,7 +368,7 @@ local function startWorldLoop()
                         else
                             removeWorldEntry(cat, model)
                         end
-                        n += 1
+                        n = n + 1
                         if n % 50 == 0 then task.wait() end
                     end
                 end
@@ -393,7 +393,7 @@ Workspace.ChildAdded:Connect(function(ch)
     if ch.Name == "Map" or ch.Name == "Map1" then attachRoot(ch) end
 end)
 
-local SecWorldToggles = TabWorld:CreateSection("Toggles")
+TabWorld:CreateSection("Toggles")
 
 TabWorld:CreateToggle({Name="Generators", CurrentValue=false, Flag="Gen", Callback=function(s) setWorldToggle("Generator", s) end})
 TabWorld:CreateToggle({Name="Hooks", CurrentValue=false, Flag="Hook", Callback=function(s) setWorldToggle("Hook", s) end})
@@ -401,7 +401,7 @@ TabWorld:CreateToggle({Name="Gates", CurrentValue=false, Flag="Gate", Callback=f
 TabWorld:CreateToggle({Name="Windows", CurrentValue=false, Flag="Window", Callback=function(s) setWorldToggle("Window", s) end})
 TabWorld:CreateToggle({Name="Pallets", CurrentValue=false, Flag="Pallet", Callback=function(s) setWorldToggle("Palletwrong", s) end})
 
-local SecWorldColors = TabWorld:CreateSection("Colors")
+TabWorld:CreateSection("Colors")
 
 TabWorld:CreateColorPicker({Name="Generators", Color=worldColors.Generator, Flag="GenCol", Callback=function(c) worldColors.Generator = c end})
 TabWorld:CreateColorPicker({Name="Hooks", Color=worldColors.Hook, Flag="HookCol", Callback=function(c) worldColors.Hook = c end})
@@ -451,7 +451,7 @@ task.spawn(function()
 end)
 
 local guiWhitelist = {
-    ["Fluent"] = true,
+    ["Rayfield"] = true,
     ["DevConsoleMaster"] = true,
     ["RobloxGui"] = true,
     ["PlayerList"] = true,
@@ -586,7 +586,7 @@ local function stopNoSkill()
     for pl,cn in pairs(charAddConns) do if cn then cn:Disconnect() end charAddConns[pl]=nil end
 end
 
-local SecMisc = TabMisc:CreateSection("Skillcheck")
+TabMisc:CreateSection("Skillcheck")
 
 TabMisc:CreateToggle({
     Name = "No Skillchecks",
@@ -628,7 +628,7 @@ local function unbindTimeLock()
     end
 end
 
-local SecVisual = TabVisual:CreateSection("Lighting")
+TabVisual:CreateSection("Lighting")
 
 TabVisual:CreateToggle({
     Name = "Fullbright",
@@ -748,7 +748,7 @@ local function setNoclip(state)
     end
 end
 
-local SecMovement = TabPlayer:CreateSection("Movement")
+TabPlayer:CreateSection("Movement")
 
 TabPlayer:CreateSlider({
     Name = "Walk Speed",
