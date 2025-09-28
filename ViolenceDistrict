@@ -605,7 +605,11 @@ local initLighting = {
     FogEnd = Lighting.FogEnd,
     GlobalShadows = Lighting.GlobalShadows,
     OutdoorAmbient = Lighting.OutdoorAmbient,
-    ExposureCompensation = Lighting.ExposureCompensation
+    ExposureCompensation = Lighting.ExposureCompensation,
+    ShadowSoftness = Lighting:FindFirstChild("ShadowSoftness") and Lighting.ShadowSoftness or nil,
+    EnvironmentDiffuseScale = Lighting:FindFirstChild("EnvironmentDiffuseScale") and Lighting.EnvironmentDiffuseScale or nil,
+    EnvironmentSpecularScale = Lighting:FindFirstChild("EnvironmentSpecularScale") and Lighting.EnvironmentSpecularScale or nil,
+    Technology = Lighting.Technology
 }
 
 local fullbrightEnabled = false
@@ -651,7 +655,7 @@ TabVisual:CreateToggle({
                 end
             end)
         else
-            for k,v in pairs(initLighting) do pcall(function() Lighting[k]=v end) end
+            for k,v in pairs(initLighting) do pcall(function() if v ~= nil then Lighting[k]=v end end) end
             desiredClockTime = Lighting.ClockTime
         end
     end
@@ -670,89 +674,138 @@ TabVisual:CreateSlider({
     end
 })
 
+-- === NO FOG ===
 local nfActive = false
-local nfStore = {lighting={},inst={},conns={},hook=false}
-local nfNames = {["Smoke"]=true,["LakeMist"]=true,["Chromatic Water Fog"]=true,["Cursed Energy Smoke"]=true,["Firm Smoke"]=true}
+local nfStore = {lighting={},inst=setmetatable({}, {__mode="k"}),conns={},hook=false}
+local nfNameTokens = {"smoke","mist","fog","haze","smog","steam","cloud","lake"}
+local nfStrictNames = {["Smoke"]=true,["LakeMist"]=true,["Chromatic Water Fog"]=true,["Cursed Energy Smoke"]=true,["Firm Smoke"]=true,["Foggy Wind"]=true}
+local nfQueue = {}
+local nfQueued = setmetatable({}, {__mode="k"})
+local nfProcessed = setmetatable({}, {__mode="k"})
+local nfQueueSignal = Instance.new("BindableEvent")
+local nfBatchSize = 200
+local nfTickDelay = 0.02
+local nfSoftRescanInterval = 5
+local nfLastSoftRescan = 0
+
 local function nfSave(inst, props)
     if not inst then return end
     nfStore.inst[inst] = nfStore.inst[inst] or {}
     for _,p in ipairs(props) do
-        local ok,v = pcall(function() return inst[p] end)
-        if ok and nfStore.inst[inst][p] == nil then nfStore.inst[inst][p] = v end
+        if nfStore.inst[inst][p] == nil then
+            local ok,v = pcall(function() return inst[p] end)
+            if ok then nfStore.inst[inst][p] = v end
+        end
     end
 end
+
 local function nfRestoreAll()
     for inst,props in pairs(nfStore.inst) do
         if inst and alive(inst) then
             for k,v in pairs(props) do pcall(function() inst[k]=v end) end
         end
     end
-    nfStore.inst = {}
+    nfStore.inst = setmetatable({}, {__mode="k"})
     if nfStore.lighting then
         for k,v in pairs(nfStore.lighting) do pcall(function() Lighting[k]=v end) end
     end
     for _,c in ipairs(nfStore.conns) do pcall(function() c:Disconnect() end) end
     nfStore.conns = {}
 end
-local function nfDisableParticle(pe)
-    if not pe or not pe:IsA("ParticleEmitter") then return end
-    nfSave(pe, {"Enabled","Rate"})
-    if pe.Enabled or pe.Rate ~= 0 then
-        pcall(function() pe.Enabled = false pe.Rate = 0 end)
-        print("[VD][NoFog] ParticleEmitter off:", pe:GetFullName())
-    end
-end
-local function nfDisableClouds(c)
-    if not c or not c:IsA("Clouds") then return end
-    nfSave(c, {"Enabled","Cover","Density","Color"})
-    if c.Enabled then
-        pcall(function() c.Enabled = false end)
-        print("[VD][NoFog] Clouds off:", c:GetFullName())
-    end
-end
-local function nfFlattenAtmosphere(a)
-    if not a or not a:IsA("Atmosphere") then return end
-    nfSave(a, {"Density","Haze","Glare","Offset","Color","Decay"})
-    pcall(function() a.Density = 0 a.Haze = 0 a.Glare = 0 end)
-    print("[VD][NoFog] Atmosphere flattened:", a:GetFullName())
-end
-local function nfApplyLighting()
-    nfStore.lighting = {
-        FogStart = Lighting.FogStart,
-        FogEnd = Lighting.FogEnd,
-        FogColor = Lighting.FogColor
-    }
-    pcall(function() Lighting.FogStart = 1e9 Lighting.FogEnd = 1e9 end)
-    print("[VD][NoFog] Lighting fog disabled")
-end
-local function nfIsFogCandidate(inst)
-    if not inst or not inst.Parent then return false end
-    if inst:IsA("Clouds") then return true end
-    if inst:IsA("Atmosphere") then return true end
-    if inst:IsA("ParticleEmitter") and (nfNames[inst.Name] or string.find(inst.Name:lower(),"smoke",1,true) or string.find(inst.Name:lower(),"mist",1,true) or string.find(inst.Name:lower(),"fog",1,true)) then
-        return true
+
+local function nfMatchesName(n)
+    local s = string.lower(n or "")
+    if nfStrictNames[n] then return true end
+    for _,t in ipairs(nfNameTokens) do
+        if string.find(s, t, 1, true) then return true end
     end
     return false
 end
+
+local function nfIsCandidate(inst)
+    if not inst or not inst.Parent then return false end
+    if inst:IsA("Clouds") then return true end
+    if inst:IsA("Atmosphere") then return true end
+    if inst:IsA("ParticleEmitter") and nfMatchesName(inst.Name) then return true end
+    if inst:IsA("SunRaysEffect") or inst:IsA("BloomEffect") or inst:IsA("DepthOfFieldEffect") then return true end
+    if inst:IsA("Folder") and nfMatchesName(inst.Name) then return true end
+    if inst:IsA("Part") and nfMatchesName(inst.Name) then return true end
+    return false
+end
+
+local function nfDisableParticle(pe) nfSave(pe, {"Enabled","Rate"}); pcall(function() pe.Enabled = false pe.Rate = 0 end) end
+local function nfDisableClouds(c) nfSave(c, {"Enabled","Cover","Density","Color"}); pcall(function() c.Enabled = false end) end
+local function nfFlattenAtmosphere(a) nfSave(a, {"Density","Haze","Glare","Offset","Color","Decay"}); pcall(function() a.Density = 0 a.Haze = 0 a.Glare = 0 end) end
+local function nfToneEffects(e)
+    if e:IsA("SunRaysEffect") then nfSave(e, {"Enabled","Intensity","Spread"}); pcall(function() e.Enabled = false end)
+    elseif e:IsA("BloomEffect") then nfSave(e, {"Enabled","Intensity","Threshold","Size"}); pcall(function() e.Enabled = false end)
+    elseif e:IsA("DepthOfFieldEffect") then nfSave(e, {"Enabled","NearIntensity","FarIntensity","InFocusRadius","FocusDistance"}); pcall(function() e.Enabled = false end) end
+end
+
 local function nfHandle(inst)
+    if nfProcessed[inst] then return end
+    nfProcessed[inst] = true
     if inst:IsA("Clouds") then nfDisableClouds(inst) return end
     if inst:IsA("Atmosphere") then nfFlattenAtmosphere(inst) return end
     if inst:IsA("ParticleEmitter") then nfDisableParticle(inst) return end
-end
-local function nfScanAll()
-    for _,root in ipairs({Workspace,Lighting,ReplicatedStorage}) do
-        for _,d in ipairs(root:GetDescendants()) do
-            if nfIsFogCandidate(d) then nfHandle(d) end
+    if inst:IsA("SunRaysEffect") or inst:IsA("BloomEffect") or inst:IsA("DepthOfFieldEffect") then nfToneEffects(inst) return end
+    if inst:IsA("Folder") or inst:IsA("Part") then
+        for _,d in ipairs(inst:GetDescendants()) do
+            if d:IsA("ParticleEmitter") and nfMatchesName(d.Name) then nfDisableParticle(d) end
         end
     end
 end
+
+local function nfEnqueue(inst)
+    if not nfActive then return end
+    if not nfIsCandidate(inst) then return end
+    if nfQueued[inst] then return end
+    nfQueued[inst] = true
+    table.insert(nfQueue, inst)
+    nfQueueSignal:Fire()
+end
+
+local function nfProcessQueue()
+    while nfActive do
+        if #nfQueue == 0 then nfQueueSignal.Event:Wait() end
+        local processed = 0
+        while nfActive and #nfQueue > 0 and processed < nfBatchSize do
+            local inst = table.remove(nfQueue, 1)
+            if inst and inst.Parent then nfHandle(inst) end
+            processed = processed + 1
+        end
+        task.wait(nfTickDelay)
+    end
+end
+
+local function nfApplyLighting()
+    nfStore.lighting = { FogStart = Lighting.FogStart, FogEnd = Lighting.FogEnd, FogColor = Lighting.FogColor }
+    pcall(function() Lighting.FogStart = 1e9 Lighting.FogEnd = 1e9 end)
+end
+
+local function nfPreferredRoots()
+    local roots = {Lighting, Workspace, ReplicatedStorage}
+    local m = Workspace:FindFirstChild("Map"); if m then table.insert(roots, m) end
+    local t = Workspace:FindFirstChild("Terrain"); if t then table.insert(roots, t) end
+    local killers = ReplicatedStorage:FindFirstChild("Killers"); if killers then table.insert(roots, killers) end
+    local mapLight = ReplicatedStorage:FindFirstChild("MapLighting"); if mapLight then table.insert(roots, mapLight) end
+    return roots
+end
+
+local function nfSoftRescan()
+    for _,root in ipairs(nfPreferredRoots()) do
+        for _,d in ipairs(root:GetDescendants()) do
+            if nfIsCandidate(d) then nfEnqueue(d) end
+        end
+    end
+end
+
 local function nfInstallHooks()
     if typeof(hookmetamethod)=="function" and typeof(getnamecallmethod)=="function" and not nfStore.hook then
         local old
         old = hookmetamethod(game,"__namecall",function(self,...)
             local m = getnamecallmethod()
             if nfActive and m=="FireServer" and typeof(self)=="Instance" and self:IsA("RemoteEvent") and self.Name=="LakeMist" and hasAncestorNamed(self,"Remotes") then
-                print("[VD][NoFog] LakeMist remote blocked:", self:GetFullName())
                 return nil
             end
             return old(self,...)
@@ -760,56 +813,199 @@ local function nfInstallHooks()
         nfStore.hook = true
     end
 end
+
 local function nfBindWatchers()
-    local a = Workspace.DescendantAdded:Connect(function(d) if nfActive and nfIsFogCandidate(d) then nfHandle(d) end end)
-    local b = Lighting.DescendantAdded:Connect(function(d) if nfActive and nfIsFogCandidate(d) then nfHandle(d) end end)
-    local c = ReplicatedStorage.DescendantAdded:Connect(function(d) if nfActive and nfIsFogCandidate(d) then nfHandle(d) end end)
-    table.insert(nfStore.conns,a); table.insert(nfStore.conns,b); table.insert(nfStore.conns,c)
+    local a = Workspace.DescendantAdded:Connect(function(d) nfEnqueue(d) end)
+    local b = Lighting.DescendantAdded:Connect(function(d) nfEnqueue(d) end)
+    local c = ReplicatedStorage.DescendantAdded:Connect(function(d) nfEnqueue(d) end)
+    local d = Workspace.ChildAdded:Connect(function(ch) if ch.Name=="Map" or ch.Name=="Map1" then task.delay(0.2, nfSoftRescan) end end)
+    local e = RunService.Heartbeat:Connect(function()
+        local now = os.clock()
+        if now - nfLastSoftRescan >= nfSoftRescanInterval then nfLastSoftRescan = now nfSoftRescan() end
+    end)
+    table.insert(nfStore.conns,a); table.insert(nfStore.conns,b); table.insert(nfStore.conns,c); table.insert(nfStore.conns,d); table.insert(nfStore.conns,e)
 end
+
+local function nfPrimeKnown()
+    local targets = {
+        "Ugc.Workspace.Map.Clouds",
+        "Ugc.Workspace.Terrain.Clouds",
+        "Ugc.Workspace.Lobby.CarLobby.Part.Smoke",
+        "Ugc.Workspace.Map.Foggy Wind",
+        "Ugc.ReplicatedStorage.Killers",
+        "Ugc.ReplicatedStorage.MapLighting",
+        "Ugc.ReplicatedStorage.Skyboxes"
+    }
+    for _,path in ipairs(targets) do
+        local inst = game
+        for seg in string.gmatch(path, "([^%.]+)") do inst = inst and inst:FindFirstChild(seg) end
+        if inst then
+            nfEnqueue(inst)
+            for _,d in ipairs(inst:GetDescendants()) do nfEnqueue(d) end
+        end
+    end
+end
+
+local nfQueueThread = nil
 local function nfEnable()
     if nfActive then return end
     nfActive = true
+    nfQueue = {}
+    nfQueued = setmetatable({}, {__mode="k"})
+    nfProcessed = setmetatable({}, {__mode="k"})
     nfApplyLighting()
-    for _,a in ipairs(Lighting:GetChildren()) do if a:IsA("Atmosphere") then nfFlattenAtmosphere(a) end end
-    local wc = Workspace:FindFirstChild("Map")
-    if wc then
-        local cl = wc:FindFirstChild("Clouds",true)
-        if cl and cl:IsA("Clouds") then nfDisableClouds(cl) end
-    end
-    local tc = Workspace:FindFirstChild("Terrain")
-    if tc then
-        local cl2 = tc:FindFirstChild("Clouds",true)
-        if cl2 and cl2:IsA("Clouds") then nfDisableClouds(cl2) end
-    end
-    nfScanAll()
+    for _,a in ipairs(Lighting:GetChildren()) do if a:IsA("Atmosphere") then nfEnqueue(a) end end
+    nfPrimeKnown()
+    nfSoftRescan()
     nfInstallHooks()
     nfBindWatchers()
+    if not nfQueueThread then nfQueueThread = task.spawn(nfProcessQueue) end
 end
+
 local function nfDisable()
     if not nfActive then return end
     nfActive = false
     nfRestoreAll()
-    print("[VD][NoFog] Restored")
+    nfQueue, nfQueued, nfProcessed = {}, setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
+    nfQueueSignal:Fire()
+    nfQueueThread = nil
 end
 
 TabVisual:CreateToggle({
     Name = "No Fog",
     CurrentValue = false,
     Flag = "NoFog",
-    Callback = function(s)
-        if s then nfEnable() else nfDisable() end
-    end
+    Callback = function(s) if s then nfEnable() else nfDisable() end end
 })
 
+-- === NO SHADOWS ===
+local nsActive = false
+local nsStore = {lighting={},parts=setmetatable({}, {__mode="k"}),conns={}}
+local nsQueue, nsQueued = {}, setmetatable({}, {__mode="k"})
+local nsProcessed = setmetatable({}, {__mode="k"})
+local nsSignal = Instance.new("BindableEvent")
+local nsBatchSize = 400
+local nsTickDelay = 0.02
+local nsSoftRescanInterval, nsLastSoft = 6, 0
+
+local function nsSaveLighting()
+    nsStore.lighting = {
+        GlobalShadows = Lighting.GlobalShadows,
+        ShadowSoftness = Lighting:FindFirstChild("ShadowSoftness") and Lighting.ShadowSoftness or nil,
+        EnvironmentDiffuseScale = Lighting:FindFirstChild("EnvironmentDiffuseScale") and Lighting.EnvironmentDiffuseScale or nil,
+        EnvironmentSpecularScale = Lighting:FindFirstChild("EnvironmentSpecularScale") and Lighting.EnvironmentSpecularScale or nil,
+        Technology = Lighting.Technology
+    }
+end
+
+local function nsApplyLighting()
+    pcall(function()
+        Lighting.GlobalShadows = false
+        if Lighting:FindFirstChild("ShadowSoftness") then Lighting.ShadowSoftness = 0 end
+        if Lighting:FindFirstChild("EnvironmentDiffuseScale") then Lighting.EnvironmentDiffuseScale = 0 end
+        if Lighting:FindFirstChild("EnvironmentSpecularScale") then Lighting.EnvironmentSpecularScale = 0 end
+        Lighting.Technology = Enum.Technology.Compatibility
+    end)
+end
+
+local function nsRestoreLighting()
+    for k,v in pairs(nsStore.lighting or {}) do pcall(function() if v ~= nil then Lighting[k]=v end end) end
+end
+
+local function nsSavePart(p)
+    if not p then return end
+    if nsStore.parts[p] == nil then nsStore.parts[p] = { CastShadow = p.CastShadow } end
+end
+
+local function nsHandlePart(p)
+    if nsProcessed[p] then return end
+    nsProcessed[p] = true
+    nsSavePart(p)
+    if p.CastShadow ~= false then pcall(function() p.CastShadow = false end) end
+end
+
+local function nsIsCandidate(obj)
+    return obj and obj:IsA("BasePart")
+end
+
+local function nsEnqueue(obj)
+    if not nsActive or not nsIsCandidate(obj) then return end
+    if nsQueued[obj] then return end
+    nsQueued[obj] = true
+    table.insert(nsQueue, obj)
+    nsSignal:Fire()
+end
+
+local function nsProcessQueue()
+    while nsActive do
+        if #nsQueue == 0 then nsSignal.Event:Wait() end
+        local c = 0
+        while nsActive and #nsQueue > 0 and c < nsBatchSize do
+            local obj = table.remove(nsQueue, 1)
+            if obj and obj.Parent then nsHandlePart(obj) end
+            c = c + 1
+        end
+        task.wait(nsTickDelay)
+    end
+end
+
+local function nsSoftRescan()
+    for _,root in ipairs({Workspace, Workspace:FindFirstChild("Map"), Workspace:FindFirstChild("Terrain")}) do
+        if root then
+            for _,d in ipairs(root:GetDescendants()) do if nsIsCandidate(d) then nsEnqueue(d) end end
+        end
+    end
+end
+
+local function nsBindWatchers()
+    local a = Workspace.DescendantAdded:Connect(function(d) if nsIsCandidate(d) then nsEnqueue(d) end end)
+    local b = Workspace.ChildAdded:Connect(function(ch) if ch.Name=="Map" or ch.Name=="Map1" then task.delay(0.2, nsSoftRescan) end end)
+    local c = RunService.Heartbeat:Connect(function()
+        local now = os.clock()
+        if now - nsLastSoft >= nsSoftRescanInterval then nsLastSoft = now nsSoftRescan() end
+    end)
+    table.insert(nsStore.conns,a); table.insert(nsStore.conns,b); table.insert(nsStore.conns,c)
+end
+
+local nsThread = nil
+local function nsEnable()
+    if nsActive then return end
+    nsActive = true
+    nsQueue, nsQueued, nsProcessed = {}, setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
+    nsSaveLighting()
+    nsApplyLighting()
+    nsSoftRescan()
+    nsBindWatchers()
+    if not nsThread then nsThread = task.spawn(nsProcessQueue) end
+end
+
+local function nsDisable()
+    if not nsActive then return end
+    nsActive = false
+    for p,st in pairs(nsStore.parts) do if p and p.Parent and st and st.CastShadow ~= nil then pcall(function() p.CastShadow = st.CastShadow end) end end
+    nsStore.parts = setmetatable({}, {__mode="k"})
+    for _,c in ipairs(nsStore.conns) do pcall(function() c:Disconnect() end) end
+    nsStore.conns = {}
+    nsRestoreLighting()
+    nsQueue, nsQueued, nsProcessed = {}, setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
+    nsSignal:Fire()
+    nsThread = nil
+end
+
+TabVisual:CreateToggle({
+    Name = "No Shadows",
+    CurrentValue = false,
+    Flag = "NoShadows",
+    Callback = function(s) if s then nsEnable() else nsDisable() end end
+})
+
+-- === Movement ===
 local currentSpeed = 16
 local speedHumanoid = nil
 local speedConnChanged, speedConnAncestry = nil, nil
 local speedBound = false
 
-local function setWalkSpeed(h, v)
-    if h and h.Parent then pcall(function() h.WalkSpeed = v end) end
-end
-
+local function setWalkSpeed(h, v) if h and h.Parent then pcall(function() h.WalkSpeed = v end) end end
 local function bindSpeedLoop()
     if speedBound then return end
     speedBound = true
@@ -818,34 +1014,21 @@ local function bindSpeedLoop()
         if speedHumanoid.WalkSpeed ~= currentSpeed then setWalkSpeed(speedHumanoid, currentSpeed) end
     end)
 end
-
-local function unbindSpeedLoop()
-    if speedBound then
-        speedBound = false
-        pcall(function() RunService:UnbindFromRenderStep("VD_SpeedEnforcer") end)
-    end
-end
-
+local function unbindSpeedLoop() if speedBound then speedBound=false pcall(function() RunService:UnbindFromRenderStep("VD_SpeedEnforcer") end) end end
 local function hookHumanoid(h)
     if speedConnChanged then speedConnChanged:Disconnect() speedConnChanged=nil end
     if speedConnAncestry then speedConnAncestry:Disconnect() speedConnAncestry=nil end
     speedHumanoid = h
     setWalkSpeed(h, currentSpeed)
     bindSpeedLoop()
-    speedConnChanged = h:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
-        if h.Parent and h.WalkSpeed ~= currentSpeed then setWalkSpeed(h, currentSpeed) end
-    end)
-    speedConnAncestry = h.AncestryChanged:Connect(function(_, parent)
-        if not parent then unbindSpeedLoop() end
-    end)
+    speedConnChanged = h:GetPropertyChangedSignal("WalkSpeed"):Connect(function() if h.Parent and h.WalkSpeed ~= currentSpeed then setWalkSpeed(h, currentSpeed) end end)
+    speedConnAncestry = h.AncestryChanged:Connect(function(_, parent) if not parent then unbindSpeedLoop() end end)
 end
-
 local function onCharacterAdded(char)
     local h = char:WaitForChild("Humanoid", 10) or char:FindFirstChildOfClass("Humanoid")
     if h then hookHumanoid(h) end
     char.ChildAdded:Connect(function(ch) if ch:IsA("Humanoid") then hookHumanoid(ch) end end)
 end
-
 if LP.Character then onCharacterAdded(LP.Character) end
 LP.CharacterAdded:Connect(onCharacterAdded)
 
@@ -861,9 +1044,7 @@ local function setNoclip(state)
             if not c then return end
             for _,part in ipairs(c:GetDescendants()) do
                 if part:IsA("BasePart") then
-                    if part.CanCollide and not noclipTouched[part] then
-                        noclipTouched[part] = true
-                    end
+                    if part.CanCollide and not noclipTouched[part] then noclipTouched[part] = true end
                     part.CanCollide = false
                 end
             end
@@ -872,9 +1053,7 @@ local function setNoclip(state)
         noclipEnabled = false
         noclipConn:Disconnect()
         noclipConn = nil
-        for part,_ in pairs(noclipTouched) do
-            if part and part.Parent then part.CanCollide = true end
-        end
+        for part,_ in pairs(noclipTouched) do if part and part.Parent then part.CanCollide = true end end
         noclipTouched = {}
     end
 end
@@ -906,16 +1085,11 @@ TabPlayer:CreateToggle({
     Name = "Noclip",
     CurrentValue = false,
     Flag = "Noclip",
-    Callback = function(s)
-        setNoclip(s)
-    end
+    Callback = function(s) setNoclip(s) end
 })
 
-LP.CharacterAdded:Connect(function()
-    if noclipEnabled then task.wait(0.2) setNoclip(true) end
-end)
+LP.CharacterAdded:Connect(function() if noclipEnabled then task.wait(0.2) setNoclip(true) end end)
 
 Rayfield:LoadConfiguration()
-
 Rayfield:Notify({Title="Violence District", Content="Loaded", Duration=6})
 Rayfield:Notify({Title="Warning", Content="Don't get stunned — this may freeze your game.", Duration=8})
