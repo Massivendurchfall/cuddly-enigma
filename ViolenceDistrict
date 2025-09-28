@@ -1,7 +1,4 @@
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
-local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
-
+local Rayfield = loadstring(game:HttpGet("https://raw.githubusercontent.com/shlexware/Rayfield/main/source"))()
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -21,24 +18,24 @@ local function validPart(p)
     return p and alive(p) and p:IsA("BasePart")
 end
 
-local Window = Fluent:CreateWindow({
-    Title = "Violence District",
-    SubTitle = "by jlcfg",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(660, 520),
-    Acrylic = false,
-    Theme = "Dark",
-    MinimizeKey = Enum.KeyCode.LeftControl
+local Window = Rayfield:CreateWindow({
+    Name = "Violence District",
+    LoadingTitle = "Violence District",
+    LoadingSubtitle = "by jlcfg",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "VD_Suite",
+        FileName = "vd_config"
+    },
+    KeySystem = false
 })
 
-local Tabs = {
-    Player = Window:AddTab({ Title = "Player", Icon = "user" }),
-    ESP = Window:AddTab({ Title = "ESP", Icon = "eye" }),
-    World = Window:AddTab({ Title = "World", Icon = "map" }),
-    Misc = Window:AddTab({ Title = "Misc", Icon = "wrench" }),
-    Visual = Window:AddTab({ Title = "Visual", Icon = "sun" }),
-    Settings = Window:AddTab({ Title = "Settings", Icon = "sliders" })
-}
+local TabPlayer = Window:CreateTab("Player")
+local TabESP = Window:CreateTab("ESP")
+local TabWorld = Window:CreateTab("World")
+local TabMisc = Window:CreateTab("Misc")
+local TabVisual = Window:CreateTab("Visual")
+local TabSettings = Window:CreateTab("Settings")
 
 local function firstBasePart(inst)
     if not alive(inst) then return nil end
@@ -189,27 +186,52 @@ local function unwatchPlayer(p)
     playerConns[p] = nil
 end
 
-local playerSec = Tabs.ESP:AddSection("Players")
-playerSec:AddToggle("PlayerESP", { Title = "Player ESP (Chams)", Default = false, Callback = function(s)
-    playerESPEnabled = s
-    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
-end})
-playerSec:AddToggle("Nametags", { Title = "Nametags", Default = false, Callback = function(s)
-    nametagsEnabled = s
-    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
-end})
-playerSec:AddColorpicker("SurvivorCol", { Title = "Survivor Color", Default = survivorColor, Callback = function(c)
-    survivorColor = c
-    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
-end})
-playerSec:AddColorpicker("KillerCol", { Title = "Killer Color", Default = killerColor, Callback = function(c)
-    killerColor = c
-    for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
-end})
+local SecPlayers = TabESP:CreateSection("Players")
+
+TabESP:CreateToggle({
+    Name = "Player ESP (Chams)",
+    CurrentValue = false,
+    Flag = "PlayerESP",
+    Callback = function(s)
+        playerESPEnabled = s
+        for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+    end
+})
+
+TabESP:CreateToggle({
+    Name = "Nametags",
+    CurrentValue = false,
+    Flag = "Nametags",
+    Callback = function(s)
+        nametagsEnabled = s
+        for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+    end
+})
+
+TabESP:CreateColorPicker({
+    Name = "Survivor Color",
+    Color = survivorColor,
+    Flag = "SurvivorCol",
+    Callback = function(c)
+        survivorColor = c
+        for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+    end
+})
+
+TabESP:CreateColorPicker({
+    Name = "Killer Color",
+    Color = killerColor,
+    Flag = "KillerCol",
+    Callback = function(c)
+        killerColor = c
+        for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+    end
+})
 
 for _,p in ipairs(Players:GetPlayers()) do if p ~= LP then watchPlayer(p) end end
 Players.PlayerAdded:Connect(watchPlayer)
 Players.PlayerRemoving:Connect(unwatchPlayer)
+
 local worldColors = {
     Generator = Color3.fromRGB(0,170,255),
     Hook = Color3.fromRGB(255,0,0),
@@ -371,19 +393,21 @@ Workspace.ChildAdded:Connect(function(ch)
     if ch.Name == "Map" or ch.Name == "Map1" then attachRoot(ch) end
 end)
 
-local worldSec = Tabs.World:AddSection("Toggles")
-worldSec:AddToggle("Gen", { Title = "Generators", Default = false, Callback = function(s) setWorldToggle("Generator", s) end })
-worldSec:AddToggle("Hook", { Title = "Hooks", Default = false, Callback = function(s) setWorldToggle("Hook", s) end })
-worldSec:AddToggle("Gate", { Title = "Gates", Default = false, Callback = function(s) setWorldToggle("Gate", s) end })
-worldSec:AddToggle("Window", { Title = "Windows", Default = false, Callback = function(s) setWorldToggle("Window", s) end })
-worldSec:AddToggle("Pallet", { Title = "Pallets", Default = false, Callback = function(s) setWorldToggle("Palletwrong", s) end })
+local SecWorldToggles = TabWorld:CreateSection("Toggles")
 
-local worldCol = Tabs.World:AddSection("Colors")
-worldCol:AddColorpicker("GenCol", { Title = "Generators", Default = worldColors.Generator, Callback = function(c) worldColors.Generator = c end })
-worldCol:AddColorpicker("HookCol", { Title = "Hooks", Default = worldColors.Hook, Callback = function(c) worldColors.Hook = c end })
-worldCol:AddColorpicker("GateCol", { Title = "Gates", Default = worldColors.Gate, Callback = function(c) worldColors.Gate = c end })
-worldCol:AddColorpicker("WinCol", { Title = "Windows", Default = worldColors.Window, Callback = function(c) worldColors.Window = c end })
-worldCol:AddColorpicker("PalCol", { Title = "Pallets", Default = worldColors.Palletwrong, Callback = function(c) worldColors.Palletwrong = c end })
+TabWorld:CreateToggle({Name="Generators", CurrentValue=false, Flag="Gen", Callback=function(s) setWorldToggle("Generator", s) end})
+TabWorld:CreateToggle({Name="Hooks", CurrentValue=false, Flag="Hook", Callback=function(s) setWorldToggle("Hook", s) end})
+TabWorld:CreateToggle({Name="Gates", CurrentValue=false, Flag="Gate", Callback=function(s) setWorldToggle("Gate", s) end})
+TabWorld:CreateToggle({Name="Windows", CurrentValue=false, Flag="Window", Callback=function(s) setWorldToggle("Window", s) end})
+TabWorld:CreateToggle({Name="Pallets", CurrentValue=false, Flag="Pallet", Callback=function(s) setWorldToggle("Palletwrong", s) end})
+
+local SecWorldColors = TabWorld:CreateSection("Colors")
+
+TabWorld:CreateColorPicker({Name="Generators", Color=worldColors.Generator, Flag="GenCol", Callback=function(c) worldColors.Generator = c end})
+TabWorld:CreateColorPicker({Name="Hooks", Color=worldColors.Hook, Flag="HookCol", Callback=function(c) worldColors.Hook = c end})
+TabWorld:CreateColorPicker({Name="Gates", Color=worldColors.Gate, Flag="GateCol", Callback=function(c) worldColors.Gate = c end})
+TabWorld:CreateColorPicker({Name="Windows", Color=worldColors.Window, Flag="WinCol", Callback=function(c) worldColors.Window = c end})
+TabWorld:CreateColorPicker({Name="Pallets", Color=worldColors.Palletwrong, Flag="PalCol", Callback=function(c) worldColors.Palletwrong = c end})
 
 local function hasAncestorNamed(instance, target)
     local p = instance and instance.Parent
@@ -425,6 +449,7 @@ end
 task.spawn(function()
     installNonDestructiveStunHook()
 end)
+
 local guiWhitelist = {
     ["Fluent"] = true,
     ["DevConsoleMaster"] = true,
@@ -561,10 +586,12 @@ local function stopNoSkill()
     for pl,cn in pairs(charAddConns) do if cn then cn:Disconnect() end charAddConns[pl]=nil end
 end
 
-local miscSec = Tabs.Misc:AddSection("Skillcheck")
-miscSec:AddToggle("NoSkill", {
-    Title = "No Skillchecks",
-    Default = false,
+local SecMisc = TabMisc:CreateSection("Skillcheck")
+
+TabMisc:CreateToggle({
+    Name = "No Skillchecks",
+    CurrentValue = false,
+    Flag = "NoSkill",
     Callback = function(s)
         noSkillEnabled = s
         if s then startNoSkill() else stopNoSkill() end
@@ -601,33 +628,47 @@ local function unbindTimeLock()
     end
 end
 
-local visSec = Tabs.Visual:AddSection("Lighting")
-visSec:AddToggle("Fullbright", { Title = "Fullbright", Default = false, Callback = function(s)
-    fullbrightEnabled = s
-    if fbLoop then task.cancel(fbLoop) fbLoop=nil end
-    if s then
-        fbLoop = task.spawn(function()
-            while fullbrightEnabled do
-                Lighting.Brightness = 2
-                Lighting.ClockTime = 14
-                Lighting.FogStart = 0
-                Lighting.FogEnd = 1e9
-                Lighting.GlobalShadows = false
-                Lighting.OutdoorAmbient = Color3.fromRGB(128,128,128)
-                Lighting.ExposureCompensation = 0
-                task.wait(0.5)
-            end
-        end)
-    else
-        for k,v in pairs(initLighting) do pcall(function() Lighting[k]=v end) end
-        desiredClockTime = Lighting.ClockTime
+local SecVisual = TabVisual:CreateSection("Lighting")
+
+TabVisual:CreateToggle({
+    Name = "Fullbright",
+    CurrentValue = false,
+    Flag = "Fullbright",
+    Callback = function(s)
+        fullbrightEnabled = s
+        if fbLoop then task.cancel(fbLoop) fbLoop=nil end
+        if s then
+            fbLoop = task.spawn(function()
+                while fullbrightEnabled do
+                    Lighting.Brightness = 2
+                    Lighting.ClockTime = 14
+                    Lighting.FogStart = 0
+                    Lighting.FogEnd = 1e9
+                    Lighting.GlobalShadows = false
+                    Lighting.OutdoorAmbient = Color3.fromRGB(128,128,128)
+                    Lighting.ExposureCompensation = 0
+                    task.wait(0.5)
+                end
+            end)
+        else
+            for k,v in pairs(initLighting) do pcall(function() Lighting[k]=v end) end
+            desiredClockTime = Lighting.ClockTime
+        end
     end
-end})
-visSec:AddSlider("TimeOfDay", { Title = "Time Of Day", Min = 0, Max = 24, Default = Lighting.ClockTime, Rounding = 1, Callback = function(v)
-    desiredClockTime = v
-    Lighting.ClockTime = v
-    bindTimeLock()
-end })
+})
+
+TabVisual:CreateSlider({
+    Name = "Time Of Day",
+    Range = {0,24},
+    Increment = 1,
+    CurrentValue = Lighting.ClockTime,
+    Flag = "TimeOfDay",
+    Callback = function(v)
+        desiredClockTime = v
+        Lighting.ClockTime = v
+        bindTimeLock()
+    end
+})
 
 local currentSpeed = 16
 local speedHumanoid = nil
@@ -707,34 +748,43 @@ local function setNoclip(state)
     end
 end
 
-local playerMove = Tabs.Player:AddSection("Movement")
-playerMove:AddSlider("WalkSpeed", { Title = "Walk Speed", Min = 0, Max = 200, Default = 16, Rounding = 0, Callback = function(v)
-    currentSpeed = v
-    if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid, currentSpeed) end
-    bindSpeedLoop()
-end})
-playerMove:AddButton({ Title = "Reset Speed", Callback = function()
-    currentSpeed = 16
-    if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid, currentSpeed) end
-end})
-playerMove:AddToggle("Noclip", { Title = "Noclip", Default = false, Callback = function(s)
-    setNoclip(s)
-end})
+local SecMovement = TabPlayer:CreateSection("Movement")
+
+TabPlayer:CreateSlider({
+    Name = "Walk Speed",
+    Range = {0,200},
+    Increment = 1,
+    CurrentValue = 16,
+    Flag = "WalkSpeed",
+    Callback = function(v)
+        currentSpeed = v
+        if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid, currentSpeed) end
+        bindSpeedLoop()
+    end
+})
+
+TabPlayer:CreateButton({
+    Name = "Reset Speed",
+    Callback = function()
+        currentSpeed = 16
+        if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid, currentSpeed) end
+    end
+})
+
+TabPlayer:CreateToggle({
+    Name = "Noclip",
+    CurrentValue = false,
+    Flag = "Noclip",
+    Callback = function(s)
+        setNoclip(s)
+    end
+})
 
 LP.CharacterAdded:Connect(function()
     if noclipEnabled then task.wait(0.2) setNoclip(true) end
 end)
 
-SaveManager:SetLibrary(Fluent)
-InterfaceManager:SetLibrary(Fluent)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({})
-InterfaceManager:SetFolder("VD_Suite")
-SaveManager:SetFolder("VD_Suite/config")
-InterfaceManager:BuildInterfaceSection(Tabs.Settings)
-SaveManager:BuildConfigSection(Tabs.Settings)
-SaveManager:LoadAutoloadConfig()
+Rayfield:LoadConfiguration()
 
-Fluent:Notify({ Title = "Violence District", Content = "Loaded", Duration = 6 })
-Fluent:Notify({ Title = "Warning", Content = "Don't get stunned — this may freeze your game.", Duration = 8 })
-Window:SelectTab(3)
+Rayfield:Notify({Title="Violence District", Content="Loaded", Duration=6})
+Rayfield:Notify({Title="Warning", Content="Don't get stunned — this may freeze your game.", Duration=8})
