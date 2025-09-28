@@ -670,6 +670,137 @@ TabVisual:CreateSlider({
     end
 })
 
+local nfActive = false
+local nfStore = {lighting={},inst={},conns={},hook=false}
+local nfNames = {["Smoke"]=true,["LakeMist"]=true,["Chromatic Water Fog"]=true,["Cursed Energy Smoke"]=true,["Firm Smoke"]=true}
+local function nfSave(inst, props)
+    if not inst then return end
+    nfStore.inst[inst] = nfStore.inst[inst] or {}
+    for _,p in ipairs(props) do
+        local ok,v = pcall(function() return inst[p] end)
+        if ok and nfStore.inst[inst][p] == nil then nfStore.inst[inst][p] = v end
+    end
+end
+local function nfRestoreAll()
+    for inst,props in pairs(nfStore.inst) do
+        if inst and alive(inst) then
+            for k,v in pairs(props) do pcall(function() inst[k]=v end) end
+        end
+    end
+    nfStore.inst = {}
+    if nfStore.lighting then
+        for k,v in pairs(nfStore.lighting) do pcall(function() Lighting[k]=v end) end
+    end
+    for _,c in ipairs(nfStore.conns) do pcall(function() c:Disconnect() end) end
+    nfStore.conns = {}
+end
+local function nfDisableParticle(pe)
+    if not pe or not pe:IsA("ParticleEmitter") then return end
+    nfSave(pe, {"Enabled","Rate"})
+    if pe.Enabled or pe.Rate ~= 0 then
+        pcall(function() pe.Enabled = false pe.Rate = 0 end)
+        print("[VD][NoFog] ParticleEmitter off:", pe:GetFullName())
+    end
+end
+local function nfDisableClouds(c)
+    if not c or not c:IsA("Clouds") then return end
+    nfSave(c, {"Enabled","Cover","Density","Color"})
+    if c.Enabled then
+        pcall(function() c.Enabled = false end)
+        print("[VD][NoFog] Clouds off:", c:GetFullName())
+    end
+end
+local function nfFlattenAtmosphere(a)
+    if not a or not a:IsA("Atmosphere") then return end
+    nfSave(a, {"Density","Haze","Glare","Offset","Color","Decay"})
+    pcall(function() a.Density = 0 a.Haze = 0 a.Glare = 0 end)
+    print("[VD][NoFog] Atmosphere flattened:", a:GetFullName())
+end
+local function nfApplyLighting()
+    nfStore.lighting = {
+        FogStart = Lighting.FogStart,
+        FogEnd = Lighting.FogEnd,
+        FogColor = Lighting.FogColor
+    }
+    pcall(function() Lighting.FogStart = 1e9 Lighting.FogEnd = 1e9 end)
+    print("[VD][NoFog] Lighting fog disabled")
+end
+local function nfIsFogCandidate(inst)
+    if not inst or not inst.Parent then return false end
+    if inst:IsA("Clouds") then return true end
+    if inst:IsA("Atmosphere") then return true end
+    if inst:IsA("ParticleEmitter") and (nfNames[inst.Name] or string.find(inst.Name:lower(),"smoke",1,true) or string.find(inst.Name:lower(),"mist",1,true) or string.find(inst.Name:lower(),"fog",1,true)) then
+        return true
+    end
+    return false
+end
+local function nfHandle(inst)
+    if inst:IsA("Clouds") then nfDisableClouds(inst) return end
+    if inst:IsA("Atmosphere") then nfFlattenAtmosphere(inst) return end
+    if inst:IsA("ParticleEmitter") then nfDisableParticle(inst) return end
+end
+local function nfScanAll()
+    for _,root in ipairs({Workspace,Lighting,ReplicatedStorage}) do
+        for _,d in ipairs(root:GetDescendants()) do
+            if nfIsFogCandidate(d) then nfHandle(d) end
+        end
+    end
+end
+local function nfInstallHooks()
+    if typeof(hookmetamethod)=="function" and typeof(getnamecallmethod)=="function" and not nfStore.hook then
+        local old
+        old = hookmetamethod(game,"__namecall",function(self,...)
+            local m = getnamecallmethod()
+            if nfActive and m=="FireServer" and typeof(self)=="Instance" and self:IsA("RemoteEvent") and self.Name=="LakeMist" and hasAncestorNamed(self,"Remotes") then
+                print("[VD][NoFog] LakeMist remote blocked:", self:GetFullName())
+                return nil
+            end
+            return old(self,...)
+        end)
+        nfStore.hook = true
+    end
+end
+local function nfBindWatchers()
+    local a = Workspace.DescendantAdded:Connect(function(d) if nfActive and nfIsFogCandidate(d) then nfHandle(d) end end)
+    local b = Lighting.DescendantAdded:Connect(function(d) if nfActive and nfIsFogCandidate(d) then nfHandle(d) end end)
+    local c = ReplicatedStorage.DescendantAdded:Connect(function(d) if nfActive and nfIsFogCandidate(d) then nfHandle(d) end end)
+    table.insert(nfStore.conns,a); table.insert(nfStore.conns,b); table.insert(nfStore.conns,c)
+end
+local function nfEnable()
+    if nfActive then return end
+    nfActive = true
+    nfApplyLighting()
+    for _,a in ipairs(Lighting:GetChildren()) do if a:IsA("Atmosphere") then nfFlattenAtmosphere(a) end end
+    local wc = Workspace:FindFirstChild("Map")
+    if wc then
+        local cl = wc:FindFirstChild("Clouds",true)
+        if cl and cl:IsA("Clouds") then nfDisableClouds(cl) end
+    end
+    local tc = Workspace:FindFirstChild("Terrain")
+    if tc then
+        local cl2 = tc:FindFirstChild("Clouds",true)
+        if cl2 and cl2:IsA("Clouds") then nfDisableClouds(cl2) end
+    end
+    nfScanAll()
+    nfInstallHooks()
+    nfBindWatchers()
+end
+local function nfDisable()
+    if not nfActive then return end
+    nfActive = false
+    nfRestoreAll()
+    print("[VD][NoFog] Restored")
+end
+
+TabVisual:CreateToggle({
+    Name = "No Fog",
+    CurrentValue = false,
+    Flag = "NoFog",
+    Callback = function(s)
+        if s then nfEnable() else nfDisable() end
+    end
+})
+
 local currentSpeed = 16
 local speedHumanoid = nil
 local speedConnChanged, speedConnAncestry = nil, nil
