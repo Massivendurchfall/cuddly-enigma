@@ -6,6 +6,8 @@ local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
+local VirtualUser = game:GetService("VirtualUser")
+
 local LP = Players.LocalPlayer
 
 local function alive(i)
@@ -952,6 +954,34 @@ local function setNoclip(state)
     end
 end
 
+-- Anti-AFK
+local antiAfkEnabled = false
+local antiAfkConn = nil
+local function setAntiAFK(state)
+    if state and not antiAfkConn then
+        antiAfkEnabled = true
+        antiAfkConn = LP.Idled:Connect(function()
+            if not antiAfkEnabled then return end
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+            end)
+            local ch = LP.Character
+            local h = ch and ch:FindFirstChildOfClass("Humanoid")
+            if h then
+                pcall(function() h.Jump = true end)
+                pcall(function() h:ChangeState(Enum.HumanoidStateType.Running) end)
+            end
+        end)
+    elseif not state and antiAfkConn then
+        antiAfkEnabled = false
+        antiAfkConn:Disconnect()
+        antiAfkConn = nil
+    else
+        antiAfkEnabled = state
+    end
+end
+
 TabPlayer:CreateSection("Movement")
 
 TabPlayer:CreateSlider({
@@ -980,6 +1010,13 @@ TabPlayer:CreateToggle({
     CurrentValue = false,
     Flag = "Noclip",
     Callback = function(s) setNoclip(s) end
+})
+
+TabPlayer:CreateToggle({
+    Name = "Anti AFK",
+    CurrentValue = false,
+    Flag = "AntiAFK",
+    Callback = function(s) setAntiAFK(s) end
 })
 
 LP.CharacterAdded:Connect(function() if noclipEnabled then task.wait(0.2) setNoclip(true) end end)
@@ -1096,7 +1133,6 @@ local function asHookRemotes()
         asStartGuardWindow(1.4)
     end
 
-    -- Pallet/<Killer>/{Stun,Stunover,StunDrop}
     local pallet = remRoot:FindFirstChild("Pallet")
     if pallet then
         local function hookFolder(f)
@@ -1119,7 +1155,6 @@ local function asHookRemotes()
         end))
     end
 
-    -- Killers/Stunned + Killers/Killer/FrenzyHitEvent
     local killers = remRoot:FindFirstChild("Killers")
     if killers then
         local stunned = killers:FindFirstChild("Stunned")
@@ -1135,7 +1170,6 @@ local function asHookRemotes()
         end
     end
 
-    -- Attacks/hit
     local attacks = remRoot:FindFirstChild("Attacks")
     if attacks then
         local hit = attacks:FindFirstChild("hit")
@@ -1146,7 +1180,6 @@ local function asHookRemotes()
         end
     end
 
-    -- Items/Adrenaline Shot/Knocked
     local items = remRoot:FindFirstChild("Items")
     if items then
         local adr = items:FindFirstChild("Adrenaline Shot")
@@ -1158,7 +1191,6 @@ local function asHookRemotes()
         end
     end
 
-    -- KillerPerks/Resentment Clinger/onstun
     local perks = remRoot:FindFirstChild("KillerPerks")
     if perks then
         local rc = perks:FindFirstChild("Resentment Clinger")
@@ -1170,7 +1202,6 @@ local function asHookRemotes()
         end
     end
 
-    -- Mechanics/gotknocked
     local mech = remRoot:FindFirstChild("Mechanics")
     if mech then
         local gk = mech:FindFirstChild("gotknocked")
@@ -1179,7 +1210,6 @@ local function asHookRemotes()
         end
     end
 
-    -- Collision/DisableCollision → Kollisionsverlust sofort rückgängig machen
     local collision = remRoot:FindFirstChild("Collision")
     if collision then
         local dc = collision:FindFirstChild("DisableCollision")
