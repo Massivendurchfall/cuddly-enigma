@@ -984,11 +984,16 @@ TabPlayer:CreateToggle({
 
 LP.CharacterAdded:Connect(function() if noclipEnabled then task.wait(0.2) setNoclip(true) end end)
 
+-- =========================
+-- Anti-Stun (mit Remote-Hooks)
+-- =========================
 local antiStunEnabled = false
 local asConnState, asConnPlat, asConnAdded, asTick = nil, nil, nil, nil
 local asParts = {}
 local asHum, asAnimator, asChar = nil, nil, nil
 local asLPCharConn = nil
+local asRemoteConns = {}
+local asGuardUntil = 0
 
 local function asCollectParts()
     asParts = {}
@@ -1043,10 +1048,151 @@ local function asStartGuard()
     end)
 end
 
+local function asStartGuardWindow(seconds)
+    asGuardUntil = os.clock() + (seconds or 1.2)
+    if asTick then asTick:Disconnect() asTick=nil end
+    asTick = RunService.Heartbeat:Connect(function()
+        if not antiStunEnabled or not asHum or not asChar then return end
+        if os.clock() > asGuardUntil then
+            if asTick then asTick:Disconnect() asTick=nil end
+            return
+        end
+        if asHum.PlatformStand or asHum.Sit then
+            pcall(function() asHum.PlatformStand = false end)
+            pcall(function() asHum.Sit = false end)
+            pcall(function() asHum.AutoRotate = true end)
+            pcall(function() asHum:ChangeState(Enum.HumanoidStateType.Running) end)
+        end
+        for _,p in ipairs(asParts) do
+            if p and p.Parent then
+                if p.Anchored then p.Anchored = false end
+                p.CanCollide = true
+            end
+        end
+    end)
+end
+
 local function asOnStateChanged(_, new)
     if new == Enum.HumanoidStateType.Physics or new == Enum.HumanoidStateType.FallingDown or new == Enum.HumanoidStateType.Ragdoll or new == Enum.HumanoidStateType.GettingUp then
         asPulse()
         asStartGuard()
+        asStartGuardWindow(1.25)
+    end
+end
+
+local function asDisconnectRemotes()
+    for _,cn in ipairs(asRemoteConns) do pcall(function() cn:Disconnect() end) end
+    asRemoteConns = {}
+end
+
+local function asHookRemotes()
+    asDisconnectRemotes()
+    local remRoot = ReplicatedStorage:FindFirstChild("Remotes")
+    if not remRoot then return end
+
+    local function onStunEvent()
+        if not antiStunEnabled then return end
+        asPulse()
+        asStartGuardWindow(1.4)
+    end
+
+    -- Pallet/<Killer>/{Stun,Stunover,StunDrop}
+    local pallet = remRoot:FindFirstChild("Pallet")
+    if pallet then
+        local function hookFolder(f)
+            for _,n in ipairs({"Stun","Stunover","StunDrop"}) do
+                local ev = f:FindFirstChild(n)
+                if ev then
+                    if ev:IsA("RemoteEvent") then
+                        table.insert(asRemoteConns, ev.OnClientEvent:Connect(onStunEvent))
+                    elseif ev:IsA("BindableEvent") then
+                        table.insert(asRemoteConns, ev.Event:Connect(onStunEvent))
+                    end
+                end
+            end
+        end
+        for _,f in ipairs(pallet:GetChildren()) do
+            if f:IsA("Folder") then hookFolder(f) end
+        end
+        table.insert(asRemoteConns, pallet.ChildAdded:Connect(function(ch)
+            if ch:IsA("Folder") then hookFolder(ch) end
+        end))
+    end
+
+    -- Killers/Stunned + Killers/Killer/FrenzyHitEvent
+    local killers = remRoot:FindFirstChild("Killers")
+    if killers then
+        local stunned = killers:FindFirstChild("Stunned")
+        if stunned and stunned:IsA("BindableEvent") then
+            table.insert(asRemoteConns, stunned.Event:Connect(onStunEvent))
+        end
+        local kroot = killers:FindFirstChild("Killer")
+        if kroot then
+            local frenzy = kroot:FindFirstChild("FrenzyHitEvent")
+            if frenzy and frenzy:IsA("RemoteEvent") then
+                table.insert(asRemoteConns, frenzy.OnClientEvent:Connect(onStunEvent))
+            end
+        end
+    end
+
+    -- Attacks/hit
+    local attacks = remRoot:FindFirstChild("Attacks")
+    if attacks then
+        local hit = attacks:FindFirstChild("hit")
+        if hit and hit:IsA("RemoteEvent") then
+            table.insert(asRemoteConns, hit.OnClientEvent:Connect(function()
+                if antiStunEnabled then asStartGuardWindow(0.6) end
+            end))
+        end
+    end
+
+    -- Items/Adrenaline Shot/Knocked
+    local items = remRoot:FindFirstChild("Items")
+    if items then
+        local adr = items:FindFirstChild("Adrenaline Shot")
+        if adr then
+            local knocked = adr:FindFirstChild("Knocked")
+            if knocked and knocked:IsA("RemoteEvent") then
+                table.insert(asRemoteConns, knocked.OnClientEvent:Connect(onStunEvent))
+            end
+        end
+    end
+
+    -- KillerPerks/Resentment Clinger/onstun
+    local perks = remRoot:FindFirstChild("KillerPerks")
+    if perks then
+        local rc = perks:FindFirstChild("Resentment Clinger")
+        if rc then
+            local onstun = rc:FindFirstChild("onstun")
+            if onstun and onstun:IsA("BindableEvent") then
+                table.insert(asRemoteConns, onstun.Event:Connect(onStunEvent))
+            end
+        end
+    end
+
+    -- Mechanics/gotknocked
+    local mech = remRoot:FindFirstChild("Mechanics")
+    if mech then
+        local gk = mech:FindFirstChild("gotknocked")
+        if gk and gk:IsA("BindableEvent") then
+            table.insert(asRemoteConns, gk.Event:Connect(onStunEvent))
+        end
+    end
+
+    -- Collision/DisableCollision → Kollisionsverlust sofort rückgängig machen
+    local collision = remRoot:FindFirstChild("Collision")
+    if collision then
+        local dc = collision:FindFirstChild("DisableCollision")
+        if dc and dc:IsA("RemoteEvent") then
+            table.insert(asRemoteConns, dc.OnClientEvent:Connect(function()
+                if not antiStunEnabled or not LP.Character then return end
+                task.defer(function()
+                    for _,p in ipairs(LP.Character:GetDescendants()) do
+                        if p:IsA("BasePart") then p.CanCollide = true end
+                    end
+                end)
+            end))
+        end
     end
 end
 
@@ -1064,6 +1210,7 @@ local function asBindCharacter(c)
         if asHum.PlatformStand then
             asPulse()
             asStartGuard()
+            asStartGuardWindow(1.0)
         end
     end)
     if asConnAdded then asConnAdded:Disconnect() end
@@ -1080,6 +1227,7 @@ local function asEnable()
     if not asLPCharConn then
         asLPCharConn = LP.CharacterAdded:Connect(function(c) if antiStunEnabled then asBindCharacter(c) end end)
     end
+    asHookRemotes()
 end
 
 local function asDisable()
@@ -1090,6 +1238,7 @@ local function asDisable()
     if asConnAdded then asConnAdded:Disconnect() asConnAdded=nil end
     if asTick then asTick:Disconnect() asTick=nil end
     if asLPCharConn then asLPCharConn:Disconnect() asLPCharConn=nil end
+    asDisconnectRemotes()
 end
 
 local function updateKillerAntiStun()
