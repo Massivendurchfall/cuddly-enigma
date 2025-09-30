@@ -988,6 +988,7 @@ local antiStunEnabled = false
 local asConnState, asConnPlat, asConnAdded, asTick = nil, nil, nil, nil
 local asParts = {}
 local asHum, asAnimator, asChar = nil, nil, nil
+local asLPCharConn = nil
 
 local function asCollectParts()
     asParts = {}
@@ -1076,7 +1077,9 @@ local function asEnable()
     if antiStunEnabled then return end
     antiStunEnabled = true
     if LP.Character then asBindCharacter(LP.Character) end
-    LP.CharacterAdded:Connect(function(c) if antiStunEnabled then asBindCharacter(c) end end)
+    if not asLPCharConn then
+        asLPCharConn = LP.CharacterAdded:Connect(function(c) if antiStunEnabled then asBindCharacter(c) end end)
+    end
 end
 
 local function asDisable()
@@ -1086,6 +1089,7 @@ local function asDisable()
     if asConnPlat then asConnPlat:Disconnect() asConnPlat=nil end
     if asConnAdded then asConnAdded:Disconnect() asConnAdded=nil end
     if asTick then asTick:Disconnect() asTick=nil end
+    if asLPCharConn then asLPCharConn:Disconnect() asLPCharConn=nil end
 end
 
 local function updateKillerAntiStun()
