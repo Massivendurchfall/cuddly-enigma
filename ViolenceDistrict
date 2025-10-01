@@ -5,6 +5,7 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
 local VirtualUser = game:GetService("VirtualUser")
 local LP = Players.LocalPlayer
 
@@ -35,6 +36,7 @@ local TabPlayer = Window:CreateTab("Player")
 local TabESP = Window:CreateTab("ESP")
 local TabWorld = Window:CreateTab("World")
 local TabVisual = Window:CreateTab("Visual")
+local TabMisc = Window:CreateTab("Misc")
 
 local function firstBasePart(inst)
     if not alive(inst) then return nil end
@@ -312,7 +314,7 @@ end
 
 local function refreshRoots()
     for _,cn in pairs(mapAdd) do if cn then cn:Disconnect() end end
-    for _,cn in pairs(mapRem) do if cn then cn:Disconnect() end end
+    for _,cn in pairs(mapRem) do if cn:Disconnect() then end end
     mapAdd, mapRem = {}, {}
     local r1 = Workspace:FindFirstChild("Map")
     local r2 = Workspace:FindFirstChild("Map1")
@@ -393,7 +395,6 @@ Workspace.ChildAdded:Connect(function(ch)
 end)
 
 TabWorld:CreateSection("Toggles")
-
 TabWorld:CreateToggle({Name="Generators", CurrentValue=false, Flag="Gen", Callback=function(s) setWorldToggle("Generator", s) end})
 TabWorld:CreateToggle({Name="Hooks", CurrentValue=false, Flag="Hook", Callback=function(s) setWorldToggle("Hook", s) end})
 TabWorld:CreateToggle({Name="Gates", CurrentValue=false, Flag="Gate", Callback=function(s) setWorldToggle("Gate", s) end})
@@ -401,7 +402,6 @@ TabWorld:CreateToggle({Name="Windows", CurrentValue=false, Flag="Window", Callba
 TabWorld:CreateToggle({Name="Pallets", CurrentValue=false, Flag="Pallet", Callback=function(s) setWorldToggle("Palletwrong", s) end})
 
 TabWorld:CreateSection("Colors")
-
 TabWorld:CreateColorPicker({Name="Generators", Color=worldColors.Generator, Flag="GenCol", Callback=function(c) worldColors.Generator = c end})
 TabWorld:CreateColorPicker({Name="Hooks", Color=worldColors.Hook, Flag="HookCol", Callback=function(c) worldColors.Hook = c end})
 TabWorld:CreateColorPicker({Name="Gates", Color=worldColors.Gate, Flag="GateCol", Callback=function(c) worldColors.Gate = c end})
@@ -771,39 +771,130 @@ TabVisual:CreateToggle({
     Callback = function(s) if s then nsEnable() else nsDisable() end end
 })
 
-local currentSpeed = 16
+local speedCurrent = 16
 local speedHumanoid = nil
-local speedConnChanged, speedConnAncestry = nil, nil
+local speedLockEnabled = false
 local speedBound = false
+local speedPaused = false
+local speedStunUntil = 0
+local speedSlowUntil = 0
+local speedConns = {changed=nil,ancestry=nil,state=nil,plat=nil,rt=nil,re={}}
+
+local function now() return os.clock() end
+local function isSuppressed()
+    if not speedHumanoid or not speedHumanoid.Parent then return true end
+    if speedHumanoid.Health <= 0 then return true end
+    if speedHumanoid.PlatformStand or speedHumanoid.Sit then return true end
+    local s = speedHumanoid:GetState()
+    if s == Enum.HumanoidStateType.Ragdoll or s == Enum.HumanoidStateType.FallingDown or s == Enum.HumanoidStateType.Physics or s == Enum.HumanoidStateType.GettingUp or s == Enum.HumanoidStateType.Seated then return true end
+    local hrp = speedHumanoid.Parent:FindFirstChild("HumanoidRootPart")
+    if hrp and hrp.Anchored then return true end
+    if speedPaused then return true end
+    if now() < speedStunUntil or now() < speedSlowUntil then return true end
+    local rt = speedHumanoid.Parent:FindFirstChild("RagdollTrigger")
+    if rt and rt:IsA("BoolValue") and rt.Value then return true end
+    return false
+end
 
 local function setWalkSpeed(h, v) if h and h.Parent then pcall(function() h.WalkSpeed = v end) end end
+
+local function enforceSpeed()
+    if not speedLockEnabled then return end
+    if not isSuppressed() and speedHumanoid and speedHumanoid.Parent and speedHumanoid.WalkSpeed ~= speedCurrent then
+        setWalkSpeed(speedHumanoid, speedCurrent)
+    end
+end
 
 local function bindSpeedLoop()
     if speedBound then return end
     speedBound = true
-    RunService:BindToRenderStep("VD_SpeedEnforcer", 300, function()
-        if not speedHumanoid or not speedHumanoid.Parent then return end
-        if speedHumanoid.WalkSpeed ~= currentSpeed then setWalkSpeed(speedHumanoid, currentSpeed) end
+    RunService:BindToRenderStep("VD_Speed", 300, function()
+        enforceSpeed()
     end)
 end
 
 local function unbindSpeedLoop()
-    if speedBound then
-        speedBound=false
-        pcall(function() RunService:UnbindFromRenderStep("VD_SpeedEnforcer") end)
+    if not speedBound then return end
+    speedBound = false
+    pcall(function() RunService:UnbindFromRenderStep("VD_Speed") end)
+end
+
+local function suppressFor(sec, kind)
+    local untilT = now() + sec
+    if kind == "stun" then
+        if untilT > speedStunUntil then speedStunUntil = untilT end
+    elseif kind == "slow" then
+        if untilT > speedSlowUntil then speedSlowUntil = untilT end
+    else
+        if untilT > speedStunUntil then speedStunUntil = untilT end
     end
 end
 
-local function hookHumanoid(h)
-    if speedConnChanged then speedConnChanged:Disconnect() speedConnChanged=nil end
-    if speedConnAncestry then speedConnAncestry:Disconnect() speedConnAncestry=nil end
-    speedHumanoid = h
-    setWalkSpeed(h, currentSpeed)
-    bindSpeedLoop()
-    speedConnChanged = h:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
-        if h.Parent and h.WalkSpeed ~= currentSpeed then setWalkSpeed(h, currentSpeed) end
+local function hookRemotes()
+    for _,c in ipairs(speedConns.re) do pcall(function() c:Disconnect() end) end
+    speedConns.re = {}
+    local function try(path, fn)
+        local inst = ReplicatedStorage
+        for seg in string.gmatch(path, "([^%.]+)") do inst = inst and inst:FindFirstChild(seg) end
+        if inst and inst:IsA("RemoteEvent") then
+            table.insert(speedConns.re, inst.OnClientEvent:Connect(function(...)
+                fn(...)
+            end))
+        elseif inst and inst:IsA("BindableEvent") then
+            table.insert(speedConns.re, inst.Event:Connect(function(...)
+                fn(...)
+            end))
+        end
+    end
+    try("Remotes.Pallet.Jason.Stun", function(...) suppressFor(2.5, "stun") end)
+    try("Remotes.Pallet.Jason.Stunover", function(...) speedStunUntil = 0 end)
+    try("Remotes.Pallet.Jason.StunDrop", function(...) suppressFor(2.0, "stun") end)
+    try("Remotes.Killers.Stunned", function(...) suppressFor(2.5, "stun") end)
+    try("Remotes.Mechanics.PalletStun", function(...) suppressFor(2.5, "stun") end)
+    try("Remotes.Mechanics.Slow", function(...) suppressFor(3.0, "slow") end)
+    try("Remotes.Mechanics.Slowserver", function(target, amt, dur)
+        if typeof(dur)=="number" then suppressFor(math.clamp(dur, 1, 10), "slow") else suppressFor(3.0, "slow") end
     end)
-    speedConnAncestry = h.AncestryChanged:Connect(function(_, parent) if not parent then unbindSpeedLoop() end end)
+end
+
+local function hookHumanoid(h)
+    if speedConns.changed then speedConns.changed:Disconnect() end
+    if speedConns.ancestry then speedConns.ancestry:Disconnect() end
+    if speedConns.state then speedConns.state:Disconnect() end
+    if speedConns.plat then speedConns.plat:Disconnect() end
+    if speedConns.rt then speedConns.rt:Disconnect() end
+    speedHumanoid = h
+    speedPaused = false
+    if not speedLockEnabled then setWalkSpeed(h, speedCurrent) end
+    bindSpeedLoop()
+    speedConns.changed = h:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+        if speedLockEnabled and not isSuppressed() and h.WalkSpeed ~= speedCurrent then setWalkSpeed(h, speedCurrent) end
+    end)
+    speedConns.ancestry = h.AncestryChanged:Connect(function(_, parent) if not parent then unbindSpeedLoop() end end)
+    speedConns.state = h.StateChanged:Connect(function(_, new)
+        if new == Enum.HumanoidStateType.Ragdoll or new == Enum.HumanoidStateType.FallingDown or new == Enum.HumanoidStateType.Physics or new == Enum.HumanoidStateType.GettingUp or new == Enum.HumanoidStateType.Seated then
+            speedPaused = true
+            suppressFor(0.5, "stun")
+            task.delay(0.6, function() speedPaused = false end)
+        end
+    end)
+    speedConns.plat = h:GetPropertyChangedSignal("PlatformStand"):Connect(function()
+        if h.PlatformStand then
+            speedPaused = true
+        else
+            speedPaused = false
+        end
+    end)
+    local ch = h.Parent
+    if ch then
+        local rt = ch:FindFirstChild("RagdollTrigger")
+        if rt and rt:IsA("BoolValue") then
+            speedConns.rt = rt.Changed:Connect(function(val)
+                if rt.Value then speedPaused = true else task.delay(0.1, function() speedPaused=false end) end
+            end)
+        end
+    end
+    hookRemotes()
 end
 
 local function onCharacterAdded(char)
@@ -850,17 +941,27 @@ TabPlayer:CreateSlider({
     CurrentValue = 16,
     Flag = "WalkSpeed",
     Callback = function(v)
-        currentSpeed = v
-        if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid, currentSpeed) end
+        speedCurrent = v
+        if speedHumanoid and speedHumanoid.Parent and not speedLockEnabled then setWalkSpeed(speedHumanoid, speedCurrent) end
         bindSpeedLoop()
+    end
+})
+
+TabPlayer:CreateToggle({
+    Name = "Speed Lock",
+    CurrentValue = false,
+    Flag = "SpeedLock",
+    Callback = function(s)
+        speedLockEnabled = s
+        if s then bindSpeedLoop() else unbindSpeedLoop() end
     end
 })
 
 TabPlayer:CreateButton({
     Name = "Reset Speed",
     Callback = function()
-        currentSpeed = 16
-        if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid, currentSpeed) end
+        speedCurrent = 16
+        if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid, speedCurrent) end
     end
 })
 
@@ -892,7 +993,6 @@ local function setAntiAFK(state)
 end
 
 TabPlayer:CreateSection("AFK")
-
 TabPlayer:CreateToggle({
     Name = "Anti AFK",
     CurrentValue = false,
@@ -900,5 +1000,177 @@ TabPlayer:CreateToggle({
     Callback = function(s) setAntiAFK(s) end
 })
 
+local function isKillerTeam()
+    local tn = LP.Team and LP.Team.Name
+    if not tn then return false end
+    tn = tn:lower()
+    return tn:find("killer", 1, true) ~= nil
+end
+
+local guiWhitelist = {
+    ["Rayfield"] = true,
+    ["DevConsoleMaster"] = true,
+    ["RobloxGui"] = true,
+    ["PlayerList"] = true,
+    ["Chat"] = true,
+    ["BubbleChat"] = true,
+    ["Backpack"] = true
+}
+
+local skillExactNames = {
+    SkillCheckPromptGui = true,
+    ["SkillCheckPromptGui-con"] = true,
+    SkillCheckEvent = true,
+    SkillCheckFailEvent = true,
+    SkillCheckResultEvent = true
+}
+
+local function isExactSkill(inst)
+    local n = inst and inst.Name
+    if not n then return false end
+    if skillExactNames[n] then return true end
+    if n:lower():find("skillcheck", 1, true) then return true end
+    return false
+end
+
+local function hardDelete(obj)
+    pcall(function()
+        if obj:IsA("ProximityPrompt") then
+            obj.Enabled = false
+            obj.HoldDuration = 1e9
+        end
+        if obj:IsA("ScreenGui") or obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
+            if obj:IsA("ScreenGui") and guiWhitelist[obj.Name] then return end
+            obj.Enabled = false
+            obj.Visible = false
+            obj.ResetOnSpawn = false
+            obj:Destroy()
+        else
+            obj:Destroy()
+        end
+    end)
+end
+
+local function nukeSkillExactOnce()
+    local pg = LP:FindFirstChild("PlayerGui")
+    if pg then
+        for _,g in ipairs(pg:GetChildren()) do if isExactSkill(g) then hardDelete(g) end end
+        for _,d in ipairs(pg:GetDescendants()) do if isExactSkill(d) then hardDelete(d) end end
+    end
+    for _,g in ipairs(StarterGui:GetChildren()) do if isExactSkill(g) then hardDelete(g) end end
+    local rem = ReplicatedStorage:FindFirstChild("Remotes")
+    if rem then
+        for _,d in ipairs(rem:GetDescendants()) do if isExactSkill(d) then hardDelete(d) end end
+    end
+end
+
+local noSkillEnabled = false
+local noSkillToggleUser = false
+local hookSkillInstalled = false
+local rsAddConn, pgAddConn, pgDescConn, sgAddConn, remAddConn, wsAddConn
+local charAddConns = {}
+
+local function installSkillBlock()
+    if hookSkillInstalled then return end
+    if typeof(hookmetamethod)=="function" and typeof(getnamecallmethod)=="function" then
+        local old
+        old = hookmetamethod(game, "__namecall", function(self, ...)
+            local m = getnamecallmethod()
+            if noSkillEnabled and typeof(self)=="Instance" and isExactSkill(self) and (m=="FireServer" or m=="InvokeServer") then
+                return nil
+            end
+            return old(self, ...)
+        end)
+        hookSkillInstalled = true
+    end
+end
+
+local function startNoSkill()
+    installSkillBlock()
+    nukeSkillExactOnce()
+    local pg = LP:FindFirstChild("PlayerGui")
+    if pg then
+        if pgAddConn then pgAddConn:Disconnect() end
+        pgAddConn = pg.ChildAdded:Connect(function(ch)
+            if noSkillEnabled and isExactSkill(ch) then hardDelete(ch) end
+        end)
+        if pgDescConn then pgDescConn:Disconnect() end
+        pgDescConn = pg.DescendantAdded:Connect(function(d)
+            if noSkillEnabled and isExactSkill(d) then hardDelete(d) end
+        end)
+    end
+    if sgAddConn then sgAddConn:Disconnect() end
+    sgAddConn = StarterGui.ChildAdded:Connect(function(ch)
+        if noSkillEnabled and isExactSkill(ch) then hardDelete(ch) end
+    end)
+    local rem = ReplicatedStorage:FindFirstChild("Remotes")
+    if rem then
+        if remAddConn then remAddConn:Disconnect() end
+        remAddConn = rem.DescendantAdded:Connect(function(d)
+            if noSkillEnabled and isExactSkill(d) then hardDelete(d) end
+        end)
+    end
+    if rsAddConn then rsAddConn:Disconnect() end
+    rsAddConn = ReplicatedStorage.DescendantAdded:Connect(function(d)
+        if not noSkillEnabled then return end
+        if d:IsA("ScreenGui") or d:IsA("BillboardGui") or d:IsA("SurfaceGui") or d:IsA("RemoteEvent") or d:IsA("RemoteFunction") or d:IsA("BindableEvent") then
+            if isExactSkill(d) then hardDelete(d) end
+        end
+    end)
+    for _,pl in ipairs(Players:GetPlayers()) do
+        if charAddConns[pl] then charAddConns[pl]:Disconnect() end
+        charAddConns[pl] = pl.CharacterAdded:Connect(function(ch)
+            if not noSkillEnabled then return end
+            task.wait(0.1)
+            for _,d in ipairs(ch:GetDescendants()) do if isExactSkill(d) then hardDelete(d) end end
+        end)
+        if pl.Character then
+            for _,d in ipairs(pl.Character:GetDescendants()) do if isExactSkill(d) then hardDelete(d) end end
+        end
+    end
+    if wsAddConn then wsAddConn:Disconnect() end
+    wsAddConn = Workspace.DescendantAdded:Connect(function(d)
+        if noSkillEnabled and isExactSkill(d) then hardDelete(d) end
+    end)
+end
+
+local function stopNoSkill()
+    if pgAddConn then pgAddConn:Disconnect() pgAddConn=nil end
+    if pgDescConn then pgDescConn:Disconnect() pgDescConn=nil end
+    if sgAddConn then sgAddConn:Disconnect() sgAddConn=nil end
+    if remAddConn then remAddConn:Disconnect() remAddConn=nil end
+    if rsAddConn then rsAddConn:Disconnect() rsAddConn=nil end
+    if wsAddConn then wsAddConn:Disconnect() wsAddConn=nil end
+    for pl,cn in pairs(charAddConns) do if cn then cn:Disconnect() end charAddConns[pl]=nil end
+end
+
+local function evalNoSkill()
+    if noSkillToggleUser and not isKillerTeam() then
+        if not noSkillEnabled then
+            noSkillEnabled = true
+            startNoSkill()
+        end
+    else
+        if noSkillEnabled then
+            noSkillEnabled = false
+            stopNoSkill()
+        end
+    end
+end
+
+LP:GetPropertyChangedSignal("Team"):Connect(evalNoSkill)
+
+TabMisc:CreateSection("Skillcheck")
+TabMisc:CreateToggle({
+    Name = "No Skillchecks",
+    CurrentValue = false,
+    Flag = "NoSkill",
+    Callback = function(s)
+        noSkillToggleUser = s
+        evalNoSkill()
+    end
+})
+
 Rayfield:LoadConfiguration()
 Rayfield:Notify({Title="Violence District", Content="Loaded", Duration=6})
+Rayfield:Notify({Title="Info", Content="Speed Lock auto-pauses on stun/slow/ragdoll; Skillchecks auto-off as Killer.", Duration=6})
