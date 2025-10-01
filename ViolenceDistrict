@@ -5,6 +5,7 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualUser = game:GetService("VirtualUser")
 local LP = Players.LocalPlayer
 
 local function alive(i)
@@ -871,6 +872,33 @@ TabPlayer:CreateToggle({
 })
 
 LP.CharacterAdded:Connect(function() if noclipEnabled then task.wait(0.2) setNoclip(true) end end)
+
+local antiAFKEnabled = false
+local antiAFKConn = nil
+
+local function setAntiAFK(state)
+    if state and not antiAFKConn then
+        antiAFKEnabled = true
+        antiAFKConn = LP.Idled:Connect(function()
+            VirtualUser:Button2Down(Vector2.new(0,0), Workspace.CurrentCamera and Workspace.CurrentCamera.CFrame or CFrame.new())
+            task.wait(1)
+            VirtualUser:Button2Up(Vector2.new(0,0), Workspace.CurrentCamera and Workspace.CurrentCamera.CFrame or CFrame.new())
+        end)
+    elseif not state and antiAFKConn then
+        antiAFKEnabled = false
+        antiAFKConn:Disconnect()
+        antiAFKConn = nil
+    end
+end
+
+TabPlayer:CreateSection("AFK")
+
+TabPlayer:CreateToggle({
+    Name = "Anti AFK",
+    CurrentValue = false,
+    Flag = "AntiAFK",
+    Callback = function(s) setAntiAFK(s) end
+})
 
 Rayfield:LoadConfiguration()
 Rayfield:Notify({Title="Violence District", Content="Loaded", Duration=6})
