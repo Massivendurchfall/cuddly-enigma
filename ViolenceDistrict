@@ -6,8 +6,6 @@ local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
-local VirtualUser = game:GetService("VirtualUser")
-
 local LP = Players.LocalPlayer
 
 local function alive(i)
@@ -478,6 +476,7 @@ local function nukeSkillExactOnce()
 end
 
 local noSkillEnabled = false
+local noSkillToggleUser = false
 local hookSkillInstalled = false
 local rsAddConn, pgAddConn, pgDescConn, sgAddConn, remAddConn, wsAddConn
 local charAddConns = {}
@@ -556,6 +555,27 @@ local function stopNoSkill()
     for pl,cn in pairs(charAddConns) do if cn then cn:Disconnect() end charAddConns[pl]=nil end
 end
 
+local function isKillerTeam()
+    local tn = LP.Team and LP.Team.Name
+    if not tn then return false end
+    tn = tn:lower()
+    return tn:find("killer", 1, true) ~= nil
+end
+
+local function evalNoSkill()
+    if noSkillToggleUser and not isKillerTeam() then
+        if not noSkillEnabled then
+            noSkillEnabled = true
+            startNoSkill()
+        end
+    else
+        if noSkillEnabled then
+            noSkillEnabled = false
+            stopNoSkill()
+        end
+    end
+end
+
 TabMisc:CreateSection("Skillcheck")
 
 TabMisc:CreateToggle({
@@ -563,8 +583,8 @@ TabMisc:CreateToggle({
     CurrentValue = false,
     Flag = "NoSkill",
     Callback = function(s)
-        noSkillEnabled = s
-        if s then startNoSkill() else stopNoSkill() end
+        noSkillToggleUser = s
+        evalNoSkill()
     end
 })
 
@@ -954,34 +974,6 @@ local function setNoclip(state)
     end
 end
 
--- Anti-AFK
-local antiAfkEnabled = false
-local antiAfkConn = nil
-local function setAntiAFK(state)
-    if state and not antiAfkConn then
-        antiAfkEnabled = true
-        antiAfkConn = LP.Idled:Connect(function()
-            if not antiAfkEnabled then return end
-            pcall(function()
-                VirtualUser:CaptureController()
-                VirtualUser:ClickButton2(Vector2.new())
-            end)
-            local ch = LP.Character
-            local h = ch and ch:FindFirstChildOfClass("Humanoid")
-            if h then
-                pcall(function() h.Jump = true end)
-                pcall(function() h:ChangeState(Enum.HumanoidStateType.Running) end)
-            end
-        end)
-    elseif not state and antiAfkConn then
-        antiAfkEnabled = false
-        antiAfkConn:Disconnect()
-        antiAfkConn = nil
-    else
-        antiAfkEnabled = state
-    end
-end
-
 TabPlayer:CreateSection("Movement")
 
 TabPlayer:CreateSlider({
@@ -1012,25 +1004,13 @@ TabPlayer:CreateToggle({
     Callback = function(s) setNoclip(s) end
 })
 
-TabPlayer:CreateToggle({
-    Name = "Anti AFK",
-    CurrentValue = false,
-    Flag = "AntiAFK",
-    Callback = function(s) setAntiAFK(s) end
-})
-
 LP.CharacterAdded:Connect(function() if noclipEnabled then task.wait(0.2) setNoclip(true) end end)
 
--- =========================
--- Anti-Stun (mit Remote-Hooks)
--- =========================
 local antiStunEnabled = false
 local asConnState, asConnPlat, asConnAdded, asTick = nil, nil, nil, nil
 local asParts = {}
 local asHum, asAnimator, asChar = nil, nil, nil
 local asLPCharConn = nil
-local asRemoteConns = {}
-local asGuardUntil = 0
 
 local function asCollectParts()
     asParts = {}
@@ -1085,144 +1065,10 @@ local function asStartGuard()
     end)
 end
 
-local function asStartGuardWindow(seconds)
-    asGuardUntil = os.clock() + (seconds or 1.2)
-    if asTick then asTick:Disconnect() asTick=nil end
-    asTick = RunService.Heartbeat:Connect(function()
-        if not antiStunEnabled or not asHum or not asChar then return end
-        if os.clock() > asGuardUntil then
-            if asTick then asTick:Disconnect() asTick=nil end
-            return
-        end
-        if asHum.PlatformStand or asHum.Sit then
-            pcall(function() asHum.PlatformStand = false end)
-            pcall(function() asHum.Sit = false end)
-            pcall(function() asHum.AutoRotate = true end)
-            pcall(function() asHum:ChangeState(Enum.HumanoidStateType.Running) end)
-        end
-        for _,p in ipairs(asParts) do
-            if p and p.Parent then
-                if p.Anchored then p.Anchored = false end
-                p.CanCollide = true
-            end
-        end
-    end)
-end
-
 local function asOnStateChanged(_, new)
     if new == Enum.HumanoidStateType.Physics or new == Enum.HumanoidStateType.FallingDown or new == Enum.HumanoidStateType.Ragdoll or new == Enum.HumanoidStateType.GettingUp then
         asPulse()
         asStartGuard()
-        asStartGuardWindow(1.25)
-    end
-end
-
-local function asDisconnectRemotes()
-    for _,cn in ipairs(asRemoteConns) do pcall(function() cn:Disconnect() end) end
-    asRemoteConns = {}
-end
-
-local function asHookRemotes()
-    asDisconnectRemotes()
-    local remRoot = ReplicatedStorage:FindFirstChild("Remotes")
-    if not remRoot then return end
-
-    local function onStunEvent()
-        if not antiStunEnabled then return end
-        asPulse()
-        asStartGuardWindow(1.4)
-    end
-
-    local pallet = remRoot:FindFirstChild("Pallet")
-    if pallet then
-        local function hookFolder(f)
-            for _,n in ipairs({"Stun","Stunover","StunDrop"}) do
-                local ev = f:FindFirstChild(n)
-                if ev then
-                    if ev:IsA("RemoteEvent") then
-                        table.insert(asRemoteConns, ev.OnClientEvent:Connect(onStunEvent))
-                    elseif ev:IsA("BindableEvent") then
-                        table.insert(asRemoteConns, ev.Event:Connect(onStunEvent))
-                    end
-                end
-            end
-        end
-        for _,f in ipairs(pallet:GetChildren()) do
-            if f:IsA("Folder") then hookFolder(f) end
-        end
-        table.insert(asRemoteConns, pallet.ChildAdded:Connect(function(ch)
-            if ch:IsA("Folder") then hookFolder(ch) end
-        end))
-    end
-
-    local killers = remRoot:FindFirstChild("Killers")
-    if killers then
-        local stunned = killers:FindFirstChild("Stunned")
-        if stunned and stunned:IsA("BindableEvent") then
-            table.insert(asRemoteConns, stunned.Event:Connect(onStunEvent))
-        end
-        local kroot = killers:FindFirstChild("Killer")
-        if kroot then
-            local frenzy = kroot:FindFirstChild("FrenzyHitEvent")
-            if frenzy and frenzy:IsA("RemoteEvent") then
-                table.insert(asRemoteConns, frenzy.OnClientEvent:Connect(onStunEvent))
-            end
-        end
-    end
-
-    local attacks = remRoot:FindFirstChild("Attacks")
-    if attacks then
-        local hit = attacks:FindFirstChild("hit")
-        if hit and hit:IsA("RemoteEvent") then
-            table.insert(asRemoteConns, hit.OnClientEvent:Connect(function()
-                if antiStunEnabled then asStartGuardWindow(0.6) end
-            end))
-        end
-    end
-
-    local items = remRoot:FindFirstChild("Items")
-    if items then
-        local adr = items:FindFirstChild("Adrenaline Shot")
-        if adr then
-            local knocked = adr:FindFirstChild("Knocked")
-            if knocked and knocked:IsA("RemoteEvent") then
-                table.insert(asRemoteConns, knocked.OnClientEvent:Connect(onStunEvent))
-            end
-        end
-    end
-
-    local perks = remRoot:FindFirstChild("KillerPerks")
-    if perks then
-        local rc = perks:FindFirstChild("Resentment Clinger")
-        if rc then
-            local onstun = rc:FindFirstChild("onstun")
-            if onstun and onstun:IsA("BindableEvent") then
-                table.insert(asRemoteConns, onstun.Event:Connect(onStunEvent))
-            end
-        end
-    end
-
-    local mech = remRoot:FindFirstChild("Mechanics")
-    if mech then
-        local gk = mech:FindFirstChild("gotknocked")
-        if gk and gk:IsA("BindableEvent") then
-            table.insert(asRemoteConns, gk.Event:Connect(onStunEvent))
-        end
-    end
-
-    local collision = remRoot:FindFirstChild("Collision")
-    if collision then
-        local dc = collision:FindFirstChild("DisableCollision")
-        if dc and dc:IsA("RemoteEvent") then
-            table.insert(asRemoteConns, dc.OnClientEvent:Connect(function()
-                if not antiStunEnabled or not LP.Character then return end
-                task.defer(function()
-                    for _,p in ipairs(LP.Character:GetDescendants()) do
-                        if p:IsA("BasePart") then p.CanCollide = true end
-                    end
-                end)
-            end))
-        end
     end
 end
 
@@ -1240,7 +1086,6 @@ local function asBindCharacter(c)
         if asHum.PlatformStand then
             asPulse()
             asStartGuard()
-            asStartGuardWindow(1.0)
         end
     end)
     if asConnAdded then asConnAdded:Disconnect() end
@@ -1257,7 +1102,6 @@ local function asEnable()
     if not asLPCharConn then
         asLPCharConn = LP.CharacterAdded:Connect(function(c) if antiStunEnabled then asBindCharacter(c) end end)
     end
-    asHookRemotes()
 end
 
 local function asDisable()
@@ -1268,15 +1112,15 @@ local function asDisable()
     if asConnAdded then asConnAdded:Disconnect() asConnAdded=nil end
     if asTick then asTick:Disconnect() asTick=nil end
     if asLPCharConn then asLPCharConn:Disconnect() asLPCharConn=nil end
-    asDisconnectRemotes()
 end
 
 local function updateKillerAntiStun()
-    if LP.Team and LP.Team.Name and string.lower(LP.Team.Name) == "killer" then
+    if LP.Team and LP.Team.Name and string.lower(LP.Team.Name):find("killer",1,true) then
         asEnable()
     else
         asDisable()
     end
+    evalNoSkill()
     if noFogToggleOn then
         nfDisable()
         task.defer(nfEnable)
@@ -1288,4 +1132,4 @@ updateKillerAntiStun()
 
 Rayfield:LoadConfiguration()
 Rayfield:Notify({Title="Violence District", Content="Loaded", Duration=6})
-Rayfield:Notify({Title="Info", Content="Anti-Stun active for Killer; No Fog auto-restarts on team change.", Duration=6})
+Rayfield:Notify({Title="Info", Content="Anti-Stun active for Killer; No Fog auto-restarts on team change. Skillcheck remover auto-off as Killer.", Duration=6})
