@@ -1,4 +1,4 @@
--- Violence District | ESP + World ESP + Visuals + Anti-AFK + Skillcheck Remover
+-- Violence District | ESP + World ESP (+ Generator Progress) + Visuals + Anti-AFK + Skillcheck Remover
 -- Speed Lock is ALWAYS ON with smart pausing (no toggle).
 
 local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
@@ -25,6 +25,7 @@ local function firstBasePart(inst)
     end
     return nil
 end
+local function clamp(n, lo, hi) if n<lo then return lo elseif n>hi then return hi else return n end end
 
 -- UI
 local Window = Rayfield:CreateWindow({
@@ -47,9 +48,8 @@ local function makeBillboard(text, color3)
     g.Size, g.StudsOffset = UDim2.new(0,180,0,34), Vector3.new(0,3,0)
     local l = Instance.new("TextLabel")
     l.Name, l.BackgroundTransparency = "Label", 1
-    l.Size, l.Font = UDim2.new(1,0,1,0), Enum.Font.GothamBold
-    l.Text, l.TextSize = text, 14
-    l.TextColor3 = color3 or Color3.new(1,1,1)
+    l.Size, l.Font, l.TextSize = UDim2.new(1,0,1,0), Enum.Font.GothamBold, 14
+    l.Text, l.TextColor3 = text, (color3 or Color3.new(1,1,1))
     l.TextStrokeTransparency, l.TextStrokeColor3 = 0, Color3.new(0,0,0)
     l.Parent = g
     return g
@@ -146,7 +146,7 @@ for _,p in ipairs(Players:GetPlayers()) do if p~=LP then watchPlayer(p) end end
 Players.PlayerAdded:Connect(watchPlayer)
 Players.PlayerRemoving:Connect(unwatchPlayer)
 
--- World ESP
+-- World ESP (+ Generator Progress)
 local worldColors = {
     Generator=Color3.fromRGB(0,170,255), Hook=Color3.fromRGB(255,0,0),
     Gate=Color3.fromRGB(255,225,0), Window=Color3.fromRGB(255,255,255),
@@ -159,7 +159,9 @@ local mapAdd, mapRem, worldLoopThread = {}, {}, nil
 
 local function pickRep(model, cat)
     if not (model and alive(model)) then return nil end
-    if cat=="Generator" then local hb=model:FindFirstChild("HitBox",true) if validPart(hb) then return hb end
+    if cat=="Generator" then
+        local hb=model:FindFirstChild("HitBox",true)
+        if validPart(hb) then return hb end
     elseif cat=="Palletwrong" then
         local a=model:FindFirstChild("HumanoidRootPart",true) if validPart(a) then return a end
         local b=model:FindFirstChild("PrimaryPartPallet",true) if validPart(b) then return b end
@@ -168,6 +170,34 @@ local function pickRep(model, cat)
     end
     return firstBasePart(model)
 end
+
+-- Generator label formatting (progress / players / paused / extras)
+local function genLabelData(model)
+    local pct = tonumber(model:GetAttribute("RepairProgress")) or 0
+    if pct > 1.001 and pct <= 100 then
+        -- looks like percent already (e.g. 58.3)
+    elseif pct >= 0 and pct <= 1.001 then
+        pct = pct * 100
+    end
+    pct = clamp(pct, 0, 100)
+    local repairers = tonumber(model:GetAttribute("PlayersRepairingCount")) or 0
+    local paused = (model:GetAttribute("ProgressPaused") == true)
+    local kickcount = tonumber(model:GetAttribute("kickcount")) or 0
+    local abyss50 = (model:GetAttribute("Abyss50Triggered") == true)
+
+    local parts = {"Gen "..tostring(math.floor(pct + 0.5)).."%"}
+    if repairers > 0 then parts[#parts+1] = "("..repairers.."p)" end
+    if paused then parts[#parts+1] = "⏸" end
+    if abyss50 then parts[#parts+1] = "⚠" end
+    if kickcount and kickcount > 0 then parts[#parts+1] = "K:"..kickcount end
+
+    local text = table.concat(parts, " ")
+    -- optional: text color by progress (green at 100, red at 0)
+    local hue = clamp((pct/100) * 0.33, 0, 0.33) -- 0 = red; 0.33 = green
+    local labelColor = Color3.fromHSV(hue, 1, 1)
+    return text, labelColor
+end
+
 local function ensureWorldEntry(cat, model)
     if not alive(model) or worldReg[cat][model] then return end
     local rep = pickRep(model, cat); if not validPart(rep) then return end
@@ -212,6 +242,21 @@ local function clearCategory(cat)
     end
 end
 local function anyWorldEnabled() for _,v in pairs(worldEnabled) do if v then return true end end return false end
+
+-- one-shot refresh for generator labels (used by ProgressUpdateEvent)
+local function refreshGeneratorLabelsOnce()
+    for model,entry in pairs(worldReg.Generator) do
+        if model and alive(model) and entry and entry.part and validPart(entry.part) then
+            local bb = entry.part:FindFirstChild("VD_Text_Generator")
+            if bb then
+                local txt, lblCol = genLabelData(model)
+                local l = bb:FindFirstChild("Label")
+                if l then l.Text = txt l.TextColor3 = lblCol end
+            end
+        end
+    end
+end
+
 local function startWorldLoop()
     if worldLoopThread then return end
     worldLoopThread = task.spawn(function()
@@ -219,7 +264,7 @@ local function startWorldLoop()
             for cat,models in pairs(worldReg) do
                 if worldEnabled[cat] then
                     local col, tagName, textName = worldColors[cat],"VD_"..cat,"VD_Text_"..cat
-                    local labelText = (cat=="Palletwrong") and "Pallet" or cat
+                    local labelTextStatic = (cat=="Palletwrong") and "Pallet" or cat
                     local n=0
                     for model,entry in pairs(models) do
                         local part = entry.part
@@ -228,11 +273,28 @@ local function startWorldLoop()
                             if validPart(part) then
                                 ensureBoxESP(part, tagName, col)
                                 local bb = part:FindFirstChild(textName)
-                                if not bb then local newbb=makeBillboard(labelText,col) newbb.Name=textName newbb.Parent=part
-                                else local lbl=bb:FindFirstChild("Label") if lbl then lbl.Text=labelText lbl.TextColor3=col end end
+                                if not bb then
+                                    local newbb = makeBillboard(labelTextStatic, col)
+                                    newbb.Name = textName
+                                    newbb.Parent = part
+                                    bb = newbb
+                                end
+                                local lbl = bb:FindFirstChild("Label")
+                                if lbl then
+                                    if cat=="Generator" then
+                                        local txt, lblCol = genLabelData(model)
+                                        lbl.Text = txt
+                                        lbl.TextColor3 = lblCol
+                                    else
+                                        lbl.Text = labelTextStatic
+                                        lbl.TextColor3 = col
+                                    end
+                                end
                             end
-                        else removeWorldEntry(cat,model) end
-                        n=n+1 if n%50==0 then task.wait() end
+                        else
+                            removeWorldEntry(cat,model)
+                        end
+                        n=n+1 if n%60==0 then task.wait() end
                     end
                 end
             end
@@ -253,7 +315,7 @@ TabWorld:CreateToggle({Name="Windows", CurrentValue=false, Flag="Window", Callba
 TabWorld:CreateToggle({Name="Pallets", CurrentValue=false, Flag="Pallet", Callback=function(s) setWorldToggle("Palletwrong", s) end})
 
 TabWorld:CreateSection("Colors")
-TabWorld:CreateColorPicker({Name="Generators", Color=worldColors.Generator, Flag="GenCol", Callback=function(c) worldColors.Generator=c end})
+TabWorld:CreateColorPicker({Name="Generators (box)", Color=worldColors.Generator, Flag="GenCol", Callback=function(c) worldColors.Generator=c end})
 TabWorld:CreateColorPicker({Name="Hooks", Color=worldColors.Hook, Flag="HookCol", Callback=function(c) worldColors.Hook=c end})
 TabWorld:CreateColorPicker({Name="Gates", Color=worldColors.Gate, Flag="GateCol", Callback=function(c) worldColors.Gate=c end})
 TabWorld:CreateColorPicker({Name="Windows", Color=worldColors.Window, Flag="WinCol", Callback=function(c) worldColors.Window=c end})
@@ -305,7 +367,7 @@ TabVisual:CreateSlider({
     Callback=function(v) desiredClockTime=v Lighting.ClockTime=v bindTimeLock() end
 })
 
--- Visuals: No Fog
+-- Visuals: No Fog (event-driven, tiny queue on Heartbeat)
 local nfActive=false
 local nfStore={lighting={},inst=setmetatable({},{__mode="k"}),conns={},tick=nil}
 local nfNameTokens={"smoke","mist","fog","haze","smog","steam","cloud","lake"}
@@ -439,7 +501,7 @@ local function nsDisable()
 end
 TabVisual:CreateToggle({Name="No Shadows", CurrentValue=false, Flag="NoShadows", Callback=function(s) if s then nsEnable() else nsDisable() end end})
 
--- Speed: ALWAYS LOCKED with smart suppression (covers multi-killer stun remotes)
+-- Speed: ALWAYS LOCKED with smart suppression + dynamic remote hooks (all killer folders)
 local speedCurrent, speedHumanoid = 16, nil
 local speedBound, speedPaused = false, false
 local speedStunUntil, speedSlowUntil = 0, 0
@@ -473,7 +535,7 @@ local function suppressFor(sec, kind)
     if kind=="slow" then if u>speedSlowUntil then speedSlowUntil=u end else if u>speedStunUntil then speedStunUntil=u end end
 end
 
--- Dynamic Remote Listener (covers all killers: Remotes.Pallet.<KillerName>.Stun/Stunover/StunDrop)
+-- Dynamic Remote Listener (incl. Pallet/<AnyKiller>, Mechanics, Killers.* + Progress.ProgressUpdateEvent)
 local function connectRemote(inst)
     if remoteHooks[inst] then return end
     local isRE, isBE = inst:IsA("RemoteEvent"), inst:IsA("BindableEvent")
@@ -483,6 +545,7 @@ local function connectRemote(inst)
     local underPallet = full:find("ReplicatedStorage.Remotes.Pallet", 1, true) ~= nil
     local underKillers = full:find("ReplicatedStorage.Remotes.Killers", 1, true) ~= nil
     local underMechanics = full:find("ReplicatedStorage.Remotes.Mechanics", 1, true) ~= nil
+    local underProgress = full:find("ReplicatedStorage.Remotes.Progress", 1, true) ~= nil
 
     local function hook(fn)
         local conn
@@ -509,6 +572,9 @@ local function connectRemote(inst)
         elseif inst.Name == "Slowserver" and isRE then
             hook(function(_,_,dur) if typeof(dur)=="number" then suppressFor(math.clamp(dur,1,10),"slow") else suppressFor(3.0,"slow") end end)
         end
+    elseif underProgress and inst.Name == "ProgressUpdateEvent" then
+        -- any server push to progress -> refresh labels immediately
+        hook(function(...) task.defer(refreshGeneratorLabelsOnce) end)
     end
 end
 
@@ -699,4 +765,4 @@ TabMisc:CreateToggle({Name="No Skillchecks", CurrentValue=false, Flag="NoSkill",
 -- Done
 Rayfield:LoadConfiguration()
 Rayfield:Notify({Title="Violence District", Content="Loaded", Duration=6})
-Rayfield:Notify({Title="Info", Content="Speed Lock auto-pauses on stun/slow/ragdoll; Skillchecks auto-off as Killer.", Duration=6})
+Rayfield:Notify({Title="Info", Content="Speed Lock + Generator Progress ESP active (toggle Generators on World tab). Skillchecks auto-off as Killer.", Duration=7})
