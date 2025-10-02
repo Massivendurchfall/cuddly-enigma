@@ -9,7 +9,7 @@ local StarterGui = game:GetService("StarterGui")
 local VirtualUser = game:GetService("VirtualUser")
 local LP = Players.LocalPlayer
 
--- utils
+-- ========= utils =========
 local function alive(i)
     if not i then return false end
     local ok = pcall(function() return i.Parent end)
@@ -19,6 +19,7 @@ local function validPart(p) return p and alive(p) and p:IsA("BasePart") end
 local function clamp(n,lo,hi) if n<lo then return lo elseif n>hi then return hi else return n end end
 local function now() return os.clock() end
 local function dist(a,b) return (a-b).Magnitude end
+
 local function firstBasePart(inst)
     if not alive(inst) then return nil end
     if inst:IsA("BasePart") then return inst end
@@ -33,6 +34,7 @@ local function firstBasePart(inst)
     end
     return nil
 end
+
 local function makeBillboard(text, color3)
     local g = Instance.new("BillboardGui")
     g.Name = "VD_Tag"
@@ -52,6 +54,7 @@ local function makeBillboard(text, color3)
     l.Parent = g
     return g
 end
+
 local function ensureBoxESP(part, name, color)
     if not validPart(part) then return end
     local a = part:FindFirstChild(name)
@@ -74,12 +77,14 @@ local function ensureBoxESP(part, name, color)
         a.Size = part.Size + Vector3.new(0.2,0.2,0.2)
     end
 end
+
 local function clearChild(o, n)
     if o and alive(o) then
         local c = o:FindFirstChild(n)
         if c then pcall(function() c:Destroy() end) end
     end
 end
+
 local function ensureHighlight(model, fill)
     if not (model and model:IsA("Model") and alive(model)) then return end
     local hl = model:FindFirstChild("VD_HL")
@@ -99,13 +104,14 @@ local function ensureHighlight(model, fill)
     hl.OutlineColor = fill
     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 end
+
 local function clearHighlight(model)
     if model and model:FindFirstChild("VD_HL") then
         pcall(function() model.VD_HL:Destroy() end)
     end
 end
 
--- ui
+-- ========= ui =========
 local Window   = Rayfield:CreateWindow({Name="Violence District",LoadingTitle="Violence District",LoadingSubtitle="by jlcfg",ConfigurationSaving={Enabled=true,FolderName="VD_Suite",FileName="vd_config"},KeySystem=false})
 local TabPlayer= Window:CreateTab("Player")
 local TabESP   = Window:CreateTab("ESP")
@@ -113,7 +119,7 @@ local TabWorld = Window:CreateTab("World")
 local TabVisual= Window:CreateTab("Visual")
 local TabMisc  = Window:CreateTab("Misc")
 
--- roles
+-- ========= roles / killer detection =========
 local function getRole(p)
     local tn = p.Team and p.Team.Name and p.Team.Name:lower() or ""
     if tn:find("killer") then return "Killer" end
@@ -121,7 +127,6 @@ local function getRole(p)
     return "Survivor"
 end
 
--- killer detect / colors
 local killerTypeName = "Killer"
 local killerColors = {
     Jason = Color3.fromRGB(255, 60, 60),
@@ -134,6 +139,7 @@ local killerColors = {
 local function currentKillerColor()
     return killerColors[killerTypeName] or killerColors.Killer
 end
+
 local knownKillers = {Jason=true, Stalker=true, Masked=true, Hidden=true, Abysswalker=true}
 do
     local r = ReplicatedStorage:FindFirstChild("Remotes")
@@ -147,7 +153,31 @@ do
     end
 end
 
--- player esp
+local function refreshKillerESPLabels()
+    for _,pl in ipairs(Players:GetPlayers()) do
+        if pl ~= LP and getRole(pl)=="Killer" then
+            if pl.Character then
+                local head = pl.Character:FindFirstChild("Head")
+                if head then
+                    local tag = head:FindFirstChild("VD_Tag")
+                    if tag then
+                        local l = tag:FindFirstChild("Label")
+                        if l then l.Text = pl.Name.." ["..tostring(killerTypeName).."]" end
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function setKillerType(name)
+    if name and knownKillers[name] and killerTypeName ~= name then
+        killerTypeName = name
+        refreshKillerESPLabels()
+    end
+end
+
+-- ========= player esp =========
 local survivorColor = Color3.fromRGB(0,255,0)
 local killerBaseColor = killerColors.Killer
 local nametagsEnabled, playerESPEnabled = false, false
@@ -212,7 +242,7 @@ for _,p in ipairs(Players:GetPlayers()) do if p~=LP then watchPlayer(p) end end
 Players.PlayerAdded:Connect(watchPlayer)
 Players.PlayerRemoving:Connect(unwatchPlayer)
 
--- world esp (generators/hooks/gates/windows/pallets)
+-- ========= world esp =========
 local worldColors = {
     Generator = Color3.fromRGB(0,170,255),
     Hook = Color3.fromRGB(255,0,0),
@@ -256,7 +286,6 @@ end
 local function genLabelData(model)
     local pct = tonumber(model:GetAttribute("RepairProgress")) or 0
     if pct>1.001 and pct<=100 then
-        -- ok
     elseif pct>=0 and pct<=1.001 then
         pct = pct*100
     end
@@ -400,7 +429,7 @@ TabWorld:CreateColorPicker({Name="Gates",Color=worldColors.Gate,Flag="GateCol",C
 TabWorld:CreateColorPicker({Name="Windows",Color=worldColors.Window,Flag="WinCol",Callback=function(c) worldColors.Window=c end})
 TabWorld:CreateColorPicker({Name="Pallets",Color=worldColors.Palletwrong,Flag="PalCol",Callback=function(c) worldColors.Palletwrong=c end})
 
--- lighting tools
+-- ========= lighting =========
 local initLighting = {
     Brightness = Lighting.Brightness,
     ClockTime = Lighting.ClockTime,
@@ -424,12 +453,6 @@ local function bindTimeLock()
     RunService:BindToRenderStep("VD_TimeLock", 299, function()
         if Lighting.ClockTime ~= desiredClockTime then Lighting.ClockTime = desiredClockTime end
     end)
-end
-local function unbindTimeLock()
-    if timeLockActive then
-        timeLockActive = false
-        pcall(function() RunService:UnbindFromRenderStep("VD_TimeLock") end)
-    end
 end
 
 TabVisual:CreateSection("Lighting")
@@ -459,12 +482,13 @@ TabVisual:CreateToggle({
 })
 TabVisual:CreateSlider({Name="Time Of Day",Range={0,24},Increment=1,CurrentValue=Lighting.ClockTime,Flag="TimeOfDay",Callback=function(v) desiredClockTime=v Lighting.ClockTime=v bindTimeLock() end})
 
--- NoFog
+-- ========= NoFog =========
 local nfActive=false
 local nfStore={lighting={},inst=setmetatable({},{__mode="k"}),conns={},tick=nil}
 local nfNameTokens={"smoke","mist","fog","haze","smog","steam","cloud","lake"}
 local nfStrictNames={["Smoke"]=true,["LakeMist"]=true,["Chromatic Water Fog"]=true,["Cursed Energy Smoke"]=true,["Firm Smoke"]=true,["Foggy Wind"]=true}
 local nfQueue, nfQueued, nfProcessed = {}, setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
+
 local function nfSave(inst, props)
     if not inst then return end
     nfStore.inst[inst] = nfStore.inst[inst] or {}
@@ -576,7 +600,7 @@ local function nfDisable()
 end
 TabVisual:CreateToggle({Name="No Fog",CurrentValue=false,Flag="NoFog",Callback=function(s) if s then nfEnable() else nfDisable() end end})
 
--- NoShadows
+-- ========= NoShadows =========
 local nsActive=false
 local nsStore={lighting={},parts=setmetatable({},{__mode="k"}),conns={}}
 local nsQueue, nsQueued, nsProcessed = {}, setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
@@ -655,7 +679,7 @@ local function nsDisable()
 end
 TabVisual:CreateToggle({Name="No Shadows",CurrentValue=false,Flag="NoShadows",Callback=function(s) if s then nsEnable() else nsDisable() end end})
 
--- speed lock (always on)
+-- ========= speed lock (always on) =========
 local speedCurrent, speedHumanoid = 16, nil
 local speedBound, speedPaused = false, false
 local speedStunUntil, speedSlowUntil = 0, 0
@@ -693,55 +717,83 @@ local function suppressFor(sec, kind)
     end
 end
 
--- remote hooks: killer detect + stun/slow awareness + gen label refresh
+-- ========= notifications =========
+local abilityNotifyEnabled = true
+TabMisc:CreateSection("Notifications")
+TabMisc:CreateToggle({Name="Killer Ability Notify",CurrentValue=true,Flag="AbilityNotify",Callback=function(s) abilityNotifyEnabled=s end})
+
+-- ========= remote hooks: killer detect + ability notify =========
 local remoteHooks=setmetatable({},{__mode="k"})
-local lastAbilityNotify={}
-local function notifyAbility(title,content)
-    local t=now(); local key=title.."|"..content
-    local last = lastAbilityNotify[key] or 0
-    if t-last>0.35 then lastAbilityNotify[key]=t Rayfield:Notify({Title=title,Content=content,Duration=3}) end
-end
-local function announceKiller(name)
-    if knownKillers[name] then
-        killerTypeName=name
-        Rayfield:Notify({Title="Killer Detected",Content=killerTypeName,Duration=5})
-        for _,pl in ipairs(Players:GetPlayers()) do if pl~=LP and getRole(pl)=="Killer" then applyPlayerESP(pl) end end
-    end
-end
+local abilityAllow = {
+    ["Killer.ActivatePower"]      = "Ability Activated",
+    ["Jason.Instinct"]            = "Instinct",
+    ["Masked.Activatepower"]      = "Dash",
+    ["Hidden.M2"]                 = "M2",
+    ["Stalker.StartStalking"]     = "Stalk",
+    ["Abysswalker.corrupt"]       = "Corrupt",
+}
+
 local function connectRemote(inst)
     if remoteHooks[inst] then return end
     local isRE,isBE=inst:IsA("RemoteEvent"),inst:IsA("BindableEvent")
     if not(isRE or isBE) then return end
     local full = inst:GetFullName()
-    local underPallet     = full:find("ReplicatedStorage.Remotes.Pallet",1,true)~=nil
-    local underWindow     = full:find("ReplicatedStorage.Remotes.Window",1,true)~=nil
     local underKillers    = full:find("ReplicatedStorage.Remotes.Killers",1,true)~=nil
     local underMechanics  = full:find("ReplicatedStorage.Remotes.Mechanics",1,true)~=nil
-    local underProgress   = full:find("ReplicatedStorage.Remotes.Progress",1,true)~=nil
+    local underPallet     = full:find("ReplicatedStorage.Remotes.Pallet",1,true)~=nil
+    local underWindow     = full:find("ReplicatedStorage.Remotes.Window",1,true)~=nil
+
     local function hook(fn)
         local conn
         if isRE then conn=inst.OnClientEvent:Connect(fn) else conn=inst.Event:Connect(fn) end
         remoteHooks[inst]=conn
     end
+
     if underKillers then
-        local path = string.split(full,".")
-        for i=#path,1,-1 do
-            if path[i]=="Killers" then
-                local nxt=path[i+1]
-                if nxt and knownKillers[nxt] then
-                    hook(function() announceKiller(nxt) notifyAbility("Killer Ability",nxt.." • "..inst.Name) end)
+        local seg = string.split(full,".")
+        for i=#seg,1,-1 do
+            if seg[i]=="Killers" then
+                local kn = seg[i+1]
+                if kn and knownKillers[kn] then
+                    -- update killer name whenever ANY remote under that killer fires
+                    hook(function(...)
+                        setKillerType(kn)
+                        local key = kn.."."..inst.Name
+                        local label = abilityAllow[key]
+                        if label and abilityNotifyEnabled then
+                            Rayfield:Notify({Title="Killer Ability",Content=kn..": "..label,Duration=4})
+                        end
+                    end)
                 else
-                    hook(function() notifyAbility("Killer Ability",inst.Name) end)
+                    -- generic "Killers.Killer.*" -> only ability notify if in allow-list (rare)
+                    local key = (kn or "Killer").."."..inst.Name
+                    if abilityAllow[key] then
+                        hook(function(...)
+                            if abilityNotifyEnabled then
+                                local who = knownKillers[kn or ""] and kn or killerTypeName
+                                Rayfield:Notify({Title="Killer Ability",Content=tostring(who)..": "..abilityAllow[key],Duration=4})
+                            end
+                        end)
+                    end
                 end
                 break
             end
         end
     end
+
+    if underMechanics then
+        if inst.Name=="PalletStun" then hook(function() suppressFor(2.5,"stun") end)
+        elseif inst.Name=="Slow" then hook(function() suppressFor(3.0,"slow") end)
+        elseif inst.Name=="Slowserver" and isRE then
+            hook(function(_,_,dur)
+                if typeof(dur)=="number" then suppressFor(math.clamp(dur,1,10),"slow") else suppressFor(3.0,"slow") end
+            end)
+        end
+    end
+
+    -- Pallet/Window: only for usability labels (NO notifications)
     if underPallet then
-        if inst.Name=="Stun" then hook(function() suppressFor(2.5,"stun") end)
-        elseif inst.Name=="Stunover" then hook(function() speedStunUntil=0 end)
-        elseif inst.Name=="StunDrop" then hook(function() suppressFor(2.0,"stun") end)
-        elseif inst.Name=="PalletDropEvent" then hook(function()
+        if inst.Name=="PalletDropEvent" then hook(function()
             local hrp=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart"); if not hrp then return end
             local best,bd=nil,1e9
             for m,e in pairs(worldReg.Palletwrong) do if e and e.part then local d=dist(e.part.Position,hrp.Position) if d<bd then bd=d best=m end end end
@@ -782,24 +834,12 @@ local function connectRemote(inst)
         end)
         end
     end
-    if underMechanics then
-        if inst.Name=="PalletStun" then hook(function() suppressFor(2.5,"stun") end)
-        elseif inst.Name=="Slow" then hook(function() suppressFor(3.0,"slow") end)
-        elseif inst.Name=="Slowserver" and isRE then
-            hook(function(_,_,dur)
-                if typeof(dur)=="number" then suppressFor(math.clamp(dur,1,10),"slow") else suppressFor(3.0,"slow") end
-            end)
-        end
-    end
-    if underProgress and inst.Name=="ProgressUpdateEvent" then
-        hook(function() -- refresh happens naturally in loop next tick
-        end)
-    end
 end
+
 for _,d in ipairs(ReplicatedStorage:GetDescendants()) do if d:IsA("RemoteEvent") or d:IsA("BindableEvent") then connectRemote(d) end end
 ReplicatedStorage.DescendantAdded:Connect(function(d) if d:IsA("RemoteEvent") or d:IsA("BindableEvent") then connectRemote(d) end end)
 
--- hook humanoid (speed lock)
+-- ========= hook humanoid (speed lock) =========
 local function hookHumanoid(h)
     speedHumanoid = h
     speedPaused = false
@@ -838,12 +878,12 @@ end
 if LP.Character then onCharacterAdded(LP.Character) end
 LP.CharacterAdded:Connect(onCharacterAdded)
 
--- player tab
+-- ========= player tab =========
 TabPlayer:CreateSection("Movement")
 TabPlayer:CreateSlider({Name="Walk Speed",Range={0,200},Increment=1,CurrentValue=16,Flag="WalkSpeed",Callback=function(v) speedCurrent=v if speedHumanoid and speedHumanoid.Parent and not isSuppressed() then setWalkSpeed(speedHumanoid,speedCurrent) end end})
 TabPlayer:CreateButton({Name="Reset Speed",Callback=function() speedCurrent=16 if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid,speedCurrent) end end})
 
--- noclip
+-- ========= noclip =========
 local noclipEnabled, noclipConn, noclipTouched = false, nil, {}
 local function setNoclip(state)
     if state and not noclipConn then
@@ -868,7 +908,7 @@ end
 TabPlayer:CreateToggle({Name="Noclip",CurrentValue=false,Flag="Noclip",Callback=function(s) setNoclip(s) end})
 LP.CharacterAdded:Connect(function() if noclipEnabled then task.wait(0.2) setNoclip(true) end end)
 
--- teleports
+-- ========= teleports =========
 TabPlayer:CreateSection("Teleports")
 local function tpCFrame(cf)
     local char=LP.Character
@@ -900,7 +940,7 @@ end
 TabPlayer:CreateButton({Name="Teleport to Killer (Nearest)",Callback=function() teleportToNearest("Killer") end})
 TabPlayer:CreateButton({Name="Teleport to Teammate (Nearest)",Callback=function() teleportToNearest("Survivor") end})
 
--- anti afk
+-- ========= anti afk =========
 TabPlayer:CreateSection("AFK")
 local antiAFKConn=nil
 local function setAntiAFK(state)
@@ -915,7 +955,7 @@ local function setAntiAFK(state)
 end
 TabPlayer:CreateToggle({Name="Anti AFK",CurrentValue=false,Flag="AntiAFK",Callback=function(s) setAntiAFK(s) end})
 
--- skillcheck remover (toggle; off if killer)
+-- ========= skillcheck remover (toggle; auto-off if killer) =========
 local function isKillerTeam() local tn=LP.Team and LP.Team.Name and LP.Team.Name:lower() or "" return tn:find("killer",1,true)~=nil end
 local guiWhitelist = {Rayfield=true,DevConsoleMaster=true,RobloxGui=true,PlayerList=true,Chat=true,BubbleChat=true,Backpack=true}
 local skillExactNames = {SkillCheckPromptGui=true,["SkillCheckPromptGui-con"]=true,SkillCheckEvent=true,SkillCheckFailEvent=true,SkillCheckResultEvent=true}
@@ -1016,7 +1056,7 @@ LP:GetPropertyChangedSignal("Team"):Connect(evalNoSkill)
 TabMisc:CreateSection("Skillcheck")
 TabMisc:CreateToggle({Name="No Skillchecks",CurrentValue=false,Flag="NoSkill",Callback=function(s) noSkillToggleUser=s evalNoSkill() end})
 
--- instant escape (two gates, find ExitLever under Map; move 50 studs to the RIGHT)
+-- ========= instant escape =========
 local function findExitLevers()
     local list={}
     local map=Workspace:FindFirstChild("Map")
@@ -1048,7 +1088,7 @@ TabWorld:CreateButton({Name="Instant-Escape (Nearest Gate)",Callback=function()
     Rayfield:Notify({Title="Instant-Escape",Content="Teleported behind gate.",Duration=4})
 end})
 
--- finalize
+-- ========= finalize =========
 Rayfield:LoadConfiguration()
 Rayfield:Notify({Title="Violence District",Content="Loaded",Duration=6})
-Rayfield:Notify({Title="Info",Content="Speed Lock active • Killer name fixed • Abilities show as notifications • Gen progress + Pallet/Window status in World tab.",Duration=7})
+Rayfield:Notify({Title="Info",Content="Speed Lock active • Killer name now shown in labels • Ability notifications toggle in Misc.",Duration=6})
