@@ -1,0 +1,430 @@
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local RS = game:GetService("ReplicatedStorage")
+local WS = game:GetService("Workspace")
+local LP = Players.LocalPlayer
+
+local Window = Rayfield:CreateWindow({
+    Name = "DOORS Suite",
+    LoadingTitle = "DOORS Suite",
+    LoadingSubtitle = "Rayfield",
+    ConfigurationSaving = {Enabled = true, FolderName = "DOORS_Suite", FileName = "doors_cfg"},
+    KeySystem = false
+})
+
+local TabESP = Window:CreateTab("ESP")
+local TabVisual = Window:CreateTab("Visuals")
+local TabMove = Window:CreateTab("Movement")
+local TabAuto = Window:CreateTab("Auto")
+
+local function alive(o)
+    local ok = pcall(function() return o.Parent end)
+    return ok and o.Parent ~= nil
+end
+
+local function firstPart(m)
+    if not alive(m) then return nil end
+    if m:IsA("BasePart") then return m end
+    if m:IsA("Model") then
+        if m.PrimaryPart and m.PrimaryPart:IsA("BasePart") and alive(m.PrimaryPart) then return m.PrimaryPart end
+        local p = m:FindFirstChildWhichIsA("BasePart", true)
+        if p then return p end
+    end
+    return m:FindFirstAncestorWhichIsA("Model") and firstPart(m:FindFirstAncestorWhichIsA("Model")) or nil
+end
+
+local function any(s, keys)
+    s = string.lower(s or "")
+    for _,k in ipairs(keys) do
+        if string.find(s, k, 1, true) then return true end
+    end
+    return false
+end
+
+local function pathHas(inst, keys)
+    local p = string.lower(inst:GetFullName())
+    for _,k in ipairs(keys) do
+        if string.find(p, k, 1, true) then return true end
+    end
+    return false
+end
+
+local function underHiding(inst)
+    local cur = inst
+    while cur and cur ~= game do
+        local n = string.lower(cur.Name)
+        if n == "wardrobe" or n == "closet" or n == "bed" then return true end
+        cur = cur.Parent
+    end
+    return false
+end
+
+local function dist(a,b) return (a-b).Magnitude end
+
+local function hrp()
+    local c = LP.Character
+    if not c then return nil end
+    return c:FindFirstChild("HumanoidRootPart")
+end
+
+local function labelWithDist(base, pos)
+    local r = hrp()
+    if not r then return base end
+    local d = dist(pos, r.Position)
+    return string.format("%s [%.0f]", base, d)
+end
+
+local function ensureHighlight(ad, col)
+    local mdl = ad:IsA("Model") and ad or ad:FindFirstAncestorOfClass("Model")
+    if not mdl then return end
+    local h = mdl:FindFirstChild("VD_HL")
+    if not h then
+        h = Instance.new("Highlight")
+        h.Name = "VD_HL"
+        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        h.FillTransparency = 0.55
+        h.OutlineTransparency = 0
+        h.Parent = mdl
+    end
+    h.Adornee = mdl
+    h.FillColor = col
+    h.OutlineColor = col
+end
+
+local function ensureBillboard(part, text, col)
+    local g = part:FindFirstChild("VD_BB")
+    if not g then
+        g = Instance.new("BillboardGui")
+        g.Name = "VD_BB"
+        g.AlwaysOnTop = true
+        g.Size = UDim2.new(0, 140, 0, 18)
+        g.StudsOffset = Vector3.new(0, 3, 0)
+        g.Parent = part
+    end
+    local l = g:FindFirstChild("T")
+    if not l then
+        l = Instance.new("TextLabel")
+        l.Name = "T"
+        l.BackgroundTransparency = 1
+        l.Size = UDim2.new(1, 0, 1, 0)
+        l.Font = Enum.Font.GothamBold
+        l.TextScaled = false
+        l.TextSize = 13
+        l.TextStrokeTransparency = 0
+        l.Parent = g
+    end
+    l.Text = text
+    l.TextColor3 = col
+    l.TextStrokeColor3 = Color3.new(0,0,0)
+    return g
+end
+
+local drawings = {}
+local function ensureLine(id)
+    if drawings[id] then return drawings[id] end
+    local ok, lib = pcall(function() return Drawing end)
+    if not ok or not lib then return nil end
+    local l = Drawing.new("Line")
+    l.Thickness = 1.5
+    l.Transparency = 1
+    drawings[id] = l
+    return l
+end
+local function clearLine(id)
+    local l = drawings[id]
+    if l then pcall(function() l.Visible = false l:Remove() end) end
+    drawings[id] = nil
+end
+local function keyFor(inst) return tostring(inst:GetDebugId()) end
+
+local toggles = {
+    Entities=false, Doors=false, Gold=false, Items=false, Containers=false, Objectives=false, Hiding=false,
+    Names=true, Distances=true, Tracers=true
+}
+
+local colors = {
+    Entities=Color3.fromRGB(255,80,80),
+    Doors=Color3.fromRGB(60,120,255),
+    Gold=Color3.fromRGB(255,220,0),
+    Items=Color3.fromRGB(60,255,120),
+    Containers=Color3.fromRGB(0,230,230),
+    Objectives=Color3.fromRGB(220,80,255),
+    Hiding=Color3.fromRGB(255,150,40)
+}
+
+local function classify(inst)
+    local n = string.lower(inst.Name or "")
+    if any(n,{"screech","figure","rush","ambush","halt","a-90","a90","a-60","a60"}) then return "Entities" end
+    if any(n,{"gold","coin"}) then return "Gold" end
+    if any(n,{"key_holder","keyobtain","key","lighter","flashlight","crucifix","vitamin","vitamins","candle","tablet","lockpick"}) then return "Items" end
+    if any(n,{"drawercontainer","spawnpile","lootholder","container","chestbox","foundlootsmall"}) then return "Containers" end
+    if any(n,{"padlock","breaker","lever","switch","backdoormodlevers"}) then return "Objectives" end
+    if any(n,{"wardrobe","closet","bed"}) then return "Hiding" end
+    if any(n,{"door","doorframe","roomdoor","doornormal","doors_","doorhitbox","doorset"}) then
+        if underHiding(inst) then return nil end
+        if pathHas(inst, {"meshes/doors_books_cube","/meshes"}) then return nil end
+        return "Doors"
+    end
+    return nil
+end
+
+local function shouldDraw(inst)
+    local cat = classify(inst)
+    if not cat then return nil end
+    if not toggles[cat] then return nil end
+    local p = firstPart(inst)
+    if not p then return nil end
+    return cat, p
+end
+
+local function applyESP(inst)
+    local cat, part = shouldDraw(inst)
+    local id = keyFor(inst)
+    if not (cat and part) then
+        local bb = part and part:FindFirstChild("VD_BB") or inst:FindFirstChild("VD_BB")
+        if bb then pcall(function() bb:Destroy() end) end
+        local mdl = inst:IsA("Model") and inst or inst:FindFirstAncestorOfClass("Model")
+        if mdl then
+            local h = mdl:FindFirstChild("VD_HL")
+            if h then pcall(function() h:Destroy() end) end
+        end
+        clearLine(id)
+        return
+    end
+    ensureHighlight(inst, colors[cat])
+    local txt = cat
+    if toggles.Distances then txt = labelWithDist(txt, part.Position) end
+    local bb = ensureBillboard(part, txt, colors[cat])
+    bb.Enabled = toggles.Names
+    if toggles.Tracers then
+        local line = ensureLine(id)
+        if line then
+            local cam = WS.CurrentCamera
+            if cam then
+                local sp, on = cam:WorldToViewportPoint(part.Position)
+                if on then
+                    local vps = cam.ViewportSize
+                    line.From = Vector2.new(vps.X*0.5, vps.Y-5)
+                    line.To = Vector2.new(sp.X, sp.Y)
+                    line.Visible = true
+                    line.Color = colors[cat]
+                else
+                    line.Visible = false
+                end
+            end
+        end
+    else
+        clearLine(id)
+    end
+end
+
+local function scanOnce()
+    local root = WS:FindFirstChild("CurrentRooms") or WS
+    for _,d in ipairs(root:GetDescendants()) do
+        applyESP(d)
+    end
+end
+
+WS.DescendantAdded:Connect(function(d) task.defer(applyESP, d) end)
+WS.DescendantRemoving:Connect(function(d)
+    local p = firstPart(d) or d
+    if p and p:FindFirstChild("VD_BB") then p:FindFirstChild("VD_BB"):Destroy() end
+    local mdl = d:IsA("Model") and d or d:FindFirstAncestorOfClass("Model")
+    if mdl and mdl:FindFirstChild("VD_HL") then mdl.VD_HL:Destroy() end
+    clearLine(keyFor(d))
+end)
+
+task.spawn(function()
+    while true do
+        scanOnce()
+        task.wait(0.75)
+    end
+end)
+
+TabESP:CreateSection("Categories")
+TabESP:CreateToggle({Name="Entities",CurrentValue=false,Flag="EntitiesESP",Callback=function(v) toggles.Entities=v end})
+TabESP:CreateToggle({Name="Doors",CurrentValue=false,Flag="DoorsESP",Callback=function(v) toggles.Doors=v end})
+TabESP:CreateToggle({Name="Gold",CurrentValue=false,Flag="GoldESP",Callback=function(v) toggles.Gold=v end})
+TabESP:CreateToggle({Name="Items",CurrentValue=false,Flag="ItemsESP",Callback=function(v) toggles.Items=v end})
+TabESP:CreateToggle({Name="Containers",CurrentValue=false,Flag="ContainersESP",Callback=function(v) toggles.Containers=v end})
+TabESP:CreateToggle({Name="Objectives",CurrentValue=false,Flag="ObjectivesESP",Callback=function(v) toggles.Objectives=v end})
+TabESP:CreateToggle({Name="Hiding Spots",CurrentValue=false,Flag="HidingESP",Callback=function(v) toggles.Hiding=v end})
+TabESP:CreateSection("Display")
+TabESP:CreateToggle({Name="Names",CurrentValue=true,Flag="Names",Callback=function(v) toggles.Names=v end})
+TabESP:CreateToggle({Name="Distances",CurrentValue=true,Flag="Dists",Callback=function(v) toggles.Distances=v end})
+TabESP:CreateToggle({Name="Tracers",CurrentValue=true,Flag="Tracers",Callback=function(v) toggles.Tracers=v end})
+
+local savedFog={FogStart=Lighting.FogStart,FogEnd=Lighting.FogEnd}
+TabVisual:CreateToggle({Name="No Fog",CurrentValue=false,Flag="NoFog",Callback=function(s)
+    if s then
+        Lighting.FogStart=1e9
+        Lighting.FogEnd=1e9
+    else
+        Lighting.FogStart=savedFog.FogStart
+        Lighting.FogEnd=savedFog.FogEnd
+    end
+end})
+
+TabVisual:CreateToggle({Name="No Smokes",CurrentValue=false,Flag="NoSmokes",Callback=function(s)
+    if s then
+        for _,d in ipairs(WS:GetDescendants()) do
+            if d:IsA("ParticleEmitter") or d:IsA("Smoke") then pcall(function() d.Enabled=false end) end
+        end
+        for _,d in ipairs(Lighting:GetDescendants()) do
+            if d:IsA("ParticleEmitter") or d:IsA("Smoke") then pcall(function() d.Enabled=false end) end
+        end
+    end
+end})
+
+local speedOn=false
+local speedVal=24
+local flyOn=false
+local flyVal=3
+
+TabMove:CreateSection("Speed")
+TabMove:CreateToggle({Name="Speed",CurrentValue=false,Flag="Spd",Callback=function(v) speedOn=v end})
+TabMove:CreateSlider({Name="Speed Value",Range={16,120},Increment=1,CurrentValue=speedVal,Flag="SpdVal",Callback=function(v) speedVal=v end})
+
+TabMove:CreateSection("Fly")
+TabMove:CreateToggle({Name="Fly",CurrentValue=false,Flag="Fly",Callback=function(v) flyOn=v end})
+TabMove:CreateSlider({Name="Fly Speed",Range={1,15},Increment=1,CurrentValue=flyVal,Flag="FlyVal",Callback=function(v) flyVal=v end})
+
+RunService.Heartbeat:Connect(function()
+    local c = LP.Character
+    if not c then return end
+    local h = c:FindFirstChildOfClass("Humanoid")
+    local root = c:FindFirstChild("HumanoidRootPart")
+    if h and speedOn then pcall(function() h.WalkSpeed = speedVal end) end
+    if h and not speedOn then pcall(function() h.WalkSpeed = 16 end) end
+    if flyOn and h and root then
+        root.AssemblyLinearVelocity = root.CFrame.LookVector * (flyVal*20)
+        h.PlatformStand = false
+    end
+end)
+
+local auto = {Gold=false,Containers=false,Doors=false,Objectives=false,AutoHide=false,AntiScreech=true,AutoCrucifixHalt=true}
+
+local function proxIn(o)
+    if not o then return nil end
+    return o:FindFirstChildOfClass("ProximityPrompt") or o:FindFirstChildWhichIsA("ProximityPrompt", true)
+end
+
+local function firePrompt(o)
+    local p = proxIn(o)
+    if p then pcall(function() fireproximityprompt(p) end) end
+end
+
+local function nearestHiding()
+    local r = WS:FindFirstChild("CurrentRooms") or WS
+    local me = hrp()
+    if not me then return nil end
+    local best, bd = nil, 1e9
+    for _,d in ipairs(r:GetDescendants()) do
+        if classify(d)=="Hiding" then
+            local p = firstPart(d)
+            if p then
+                local dd = dist(p.Position, me.Position)
+                if dd < bd then bd = dd best = d end
+            end
+        end
+    end
+    return best
+end
+
+local function autoLoop()
+    while true do
+        local r = WS:FindFirstChild("CurrentRooms") or WS
+        if auto.Gold or auto.Containers or auto.Doors or auto.Objectives then
+            for _,d in ipairs(r:GetDescendants()) do
+                local cat = classify(d)
+                if auto.Gold and cat=="Gold" then firePrompt(d) end
+                if auto.Containers and cat=="Containers" then firePrompt(d) end
+                if auto.Doors and cat=="Doors" then firePrompt(d) end
+                if auto.Objectives and cat=="Objectives" then firePrompt(d) end
+            end
+        end
+        task.wait(0.25)
+    end
+end
+task.spawn(autoLoop)
+
+local lastRushCheck = 0
+local function detectRushAmbush()
+    local root = WS:FindFirstChild("CurrentRooms") or WS
+    for _,d in ipairs(root:GetDescendants()) do
+        local n = string.lower(d.Name)
+        if n:find("rush") or n:find("ambush") then return true end
+    end
+    return false
+end
+
+RunService.Heartbeat:Connect(function()
+    if not auto.AutoHide then return end
+    local t = os.clock()
+    if t - lastRushCheck < 0.2 then return end
+    lastRushCheck = t
+    if detectRushAmbush() then
+        local h = nearestHiding()
+        if h then firePrompt(h) end
+    end
+end)
+
+local function hasCrucifix()
+    local bp = LP.Backpack
+    local ch = LP.Character
+    local function hasIn(container)
+        if not container then return false end
+        for _,i in ipairs(container:GetChildren()) do
+            local n = string.lower(i.Name)
+            if n:find("crucifix") then return i end
+        end
+        return false
+    end
+    return hasIn(ch) or hasIn(bp)
+end
+
+local function detectHalt()
+    local root = WS:FindFirstChild("CurrentRooms") or WS
+    for _,d in ipairs(root:GetDescendants()) do
+        local n = string.lower(d.Name)
+        if n:find("halt") then return true end
+    end
+    return false
+end
+
+RunService.Heartbeat:Connect(function()
+    if not auto.AutoCrucifixHalt then return end
+    if detectHalt() then
+        local c = hasCrucifix()
+        if c and c:FindFirstChild("Handle") then
+            local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+            if hum then pcall(function() hum:EquipTool(c) end) end
+        end
+    end
+end)
+
+local lastScreech = 0
+local screechRemote = RS:FindFirstChild("RemotesFolder") and RS.RemotesFolder:FindFirstChild("Screech") or nil
+if screechRemote and screechRemote:IsA("RemoteEvent") then
+    screechRemote.OnClientEvent:Connect(function()
+        if auto.AntiScreech and os.clock()-lastScreech>1 then
+            lastScreech=os.clock()
+            Rayfield:Notify({Title="Screech",Content="Incoming",Duration=2})
+        end
+    end)
+end
+
+TabAuto:CreateSection("Interact")
+TabAuto:CreateToggle({Name="Auto Gold",CurrentValue=false,Flag="AutoGold",Callback=function(v) auto.Gold=v end})
+TabAuto:CreateToggle({Name="Auto Containers",CurrentValue=false,Flag="AutoContainers",Callback=function(v) auto.Containers=v end})
+TabAuto:CreateToggle({Name="Auto Doors",CurrentValue=false,Flag="AutoDoors",Callback=function(v) auto.Doors=v end})
+TabAuto:CreateToggle({Name="Auto Objectives",CurrentValue=false,Flag="AutoObjectives",Callback=function(v) auto.Objectives=v end})
+TabAuto:CreateSection("Smart")
+TabAuto:CreateToggle({Name="Auto Hide (Rush/Ambush)",CurrentValue=false,Flag="AutoHide",Callback=function(v) auto.AutoHide=v end})
+TabAuto:CreateToggle({Name="Anti Screech Notify",CurrentValue=true,Flag="AntiScreech",Callback=function(v) auto.AntiScreech=v end})
+TabAuto:CreateToggle({Name="Auto Crucifix Halt",CurrentValue=true,Flag="AutoHalt",Callback=function(v) auto.AutoCrucifixHalt=v end})
+
+Rayfield:Notify({Title="DOORS Suite",Content="Loaded",Duration=5})
