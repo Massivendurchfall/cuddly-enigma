@@ -560,7 +560,7 @@ local function nfHandle(inst)
     if inst:IsA("Clouds") then nfDisableClouds(inst) return end
     if inst:IsA("Atmosphere") then nfFlattenAtmosphere(inst) return end
     if inst:IsA("ParticleEmitter") then nfDisableParticle(inst) return end
-    if inst:IsA("SunRaysEffect") or inst:IsA("BloomEffect") or inst:IsA("DepthOfFieldEffect") then nfToneEffects(inst) return end
+    if inst:IsA("SunRaysEffect") or inst:IsA("BloomEffect") then nfToneEffects(inst) return end
     if inst:IsA("Folder") or inst:IsA("Part") then
         for _,d in ipairs(inst:GetDescendants()) do
             if d:IsA("ParticleEmitter") and nfMatchesName(d.Name) then nfDisableParticle(d) end
@@ -1188,6 +1188,203 @@ TabWorld:CreateButton({Name="Instant-Escape (Nearest Gate)",Callback=function()
     Rayfield:Notify({Title="Instant-Escape",Content="Teleported behind gate.",Duration=4})
 end})
 
+-- ========= AUTO REPAIR GENS (hardcoded Scanner + TP & Killer Avoid) =========
+do
+    local autoRepairEnabled = false
+    local SCAN_INTERVAL = 1.0          -- hart verdrahtet: interner Scan
+    local REPAIR_TICK   = 0.25         -- wie oft Repair-Call / Retarget prüft
+    local AVOID_RADIUS  = 80           -- Killer-Abstand (Studs), bei < wechsle Gen
+    local MOVE_DIST     = 35           -- ab dieser Distanz wird teleportiert
+    local UP_OFFSET     = Vector3.new(0, 3, 0) -- leichte Höhe beim TP
+    local gens = {}                    -- { {model=Model, part=BasePart}, ... }
+    local current = nil                -- aktuelles Ziel {model,part}
+    local lastScan = 0
+
+    local function findRemotes()
+        local r = ReplicatedStorage:FindFirstChild("Remotes")
+        if not r then return nil,nil end
+        local g = r:FindFirstChild("Generator")
+        if not g then return nil,nil end
+        local repair = g:FindFirstChild("RepairEvent")
+        local anim   = g:FindFirstChild("RepairAnim")
+        return repair, anim
+    end
+    local RepairEvent, RepairAnim = findRemotes()
+
+    local function ensureRemotes()
+        if RepairEvent and RepairEvent.Parent then return end
+        RepairEvent, RepairAnim = findRemotes()
+    end
+
+    local function modelOfGenerator(node)
+        local m = node
+        while m and m.Parent do
+            if m:IsA("Model") and m.Name=="Generator" then return m end
+            m = m.Parent
+        end
+        return nil
+    end
+
+    local function getGenPartFromModel(m)
+        if not (m and alive(m)) then return nil end
+        local hb = m:FindFirstChild("HitBox", true)
+        if validPart(hb) then return hb end
+        return firstBasePart(m)
+    end
+
+    local function genProgress(m)
+        local p = tonumber(m:GetAttribute("RepairProgress")) or 0
+        if p <= 1.001 then p = p * 100 end
+        return clamp(p,0,100)
+    end
+
+    local function genPaused(m)
+        return (m:GetAttribute("ProgressPaused")==true)
+    end
+
+    local function rescanGenerators()
+        gens = {}
+        local function scanRoot(root)
+            if not root then return end
+            for _,d in ipairs(root:GetDescendants()) do
+                if d:IsA("Model") and d.Name=="Generator" then
+                    local part = getGenPartFromModel(d)
+                    if validPart(part) then
+                        table.insert(gens, {model=d, part=part})
+                    end
+                end
+            end
+        end
+        scanRoot(Workspace:FindFirstChild("Map"))
+        scanRoot(Workspace:FindFirstChild("Map1"))
+    end
+
+    local function nearestKillerDistanceTo(pos)
+        local bd = 1e9
+        for _,pl in ipairs(Players:GetPlayers()) do
+            if pl ~= LP and getRole(pl)=="Killer" then
+                local ch = pl.Character
+                local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local d = (hrp.Position - pos).Magnitude
+                    if d < bd then bd = d end
+                end
+            end
+        end
+        return bd
+    end
+
+    local function lpHRP()
+        return LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    end
+
+    local function chooseTarget()
+        local best = nil
+        local bestScore = -1
+        for _,g in ipairs(gens) do
+            local m = g.model
+            if alive(m) then
+                local prog = genProgress(m)
+                if prog < 100 and not genPaused(m) then
+                    local pos = g.part.Position
+                    local kd = nearestKillerDistanceTo(pos)
+                    -- Score: priorisiere Sicherheit zuerst, dann Fortschritt
+                    local score = (kd >= AVOID_RADIUS and 1000 or 0) + prog
+                    if score > bestScore then
+                        bestScore = score
+                        best = g
+                    end
+                end
+            end
+        end
+        return best
+    end
+
+    local function safeFromKiller(target)
+        if not target or not target.part then return false end
+        local kd = nearestKillerDistanceTo(target.part.Position)
+        return kd >= AVOID_RADIUS
+    end
+
+    local function closeEnough(target)
+        local hrp = lpHRP(); if not hrp then return false end
+        return (hrp.Position - target.part.Position).Magnitude <= MOVE_DIST
+    end
+
+    local function tpNear(part)
+        local cf = part.CFrame * CFrame.new(0,0,-3)
+        tpCFrame((cf + UP_OFFSET))
+    end
+
+    local function doRepair(target)
+        ensureRemotes()
+        if RepairAnim and RepairAnim.FireServer then pcall(function() RepairAnim:FireServer(target.model) end) end
+        if RepairEvent and RepairEvent.FireServer then pcall(function() RepairEvent:FireServer(target.model) end) end
+    end
+
+    -- interner Scanner (hardcoded, immer an)
+    task.spawn(function()
+        while true do
+            local t = now()
+            if t - lastScan >= SCAN_INTERVAL then
+                lastScan = t
+                rescanGenerators()
+            end
+            task.wait(0.2)
+        end
+    end)
+
+    -- Hauptloop (nur aktiv, wenn Toggle an)
+    task.spawn(function()
+        while true do
+            if autoRepairEnabled then
+                -- wähle/prüfe Ziel
+                if (not current) or (not alive(current.model)) or genProgress(current.model) >= 100 or genPaused(current.model) or (not safeFromKiller(current)) then
+                    current = chooseTarget()
+                end
+
+                if current and alive(current.model) and genProgress(current.model) < 100 then
+                    -- Killer nahe am Spieler? -> eventuell sofort retargeten/TP
+                    local me = lpHRP()
+                    if me and nearestKillerDistanceTo(me.Position) < AVOID_RADIUS then
+                        local alt = chooseTarget()
+                        if alt and alt ~= current then current = alt end
+                    end
+
+                    -- Teleport falls nötig
+                    if not closeEnough(current) then
+                        tpNear(current.part)
+                    end
+
+                    -- Repair feuern
+                    doRepair(current)
+                end
+            end
+            task.wait(REPAIR_TICK)
+        end
+    end)
+
+    -- Ein einziger Toggle in World-Tab
+    TabWorld:CreateToggle({
+        Name="Auto-Repair Gens",
+        CurrentValue=false,
+        Flag="AutoRepairGens",
+        Callback=function(state)
+            autoRepairEnabled = state
+            Rayfield:Notify({
+                Title="Auto-Repair",
+                Content=state and "aktiviert" or "deaktiviert",
+                Duration=4
+            })
+        end
+    })
+
+    -- Remotes können nach Map-Wechsel neu geladen werden
+    ReplicatedStorage.DescendantAdded:Connect(function(d)
+        if d:IsA("RemoteEvent") and d.Name=="RepairEvent" then RepairEvent=d end
+        if d:IsA("RemoteEvent") and d.Name=="RepairAnim"  then RepairAnim=d end
+    end)
+end
 -- ========= finalize =========
 Rayfield:LoadConfiguration()
 Rayfield:Notify({Title="Violence District",Content="Loaded",Duration=6})
