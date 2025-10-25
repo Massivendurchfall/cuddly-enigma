@@ -1,0 +1,415 @@
+local function get_loader() return getfenv().loadstring or loadstring end
+local function try_load(url)
+    local ok, src = pcall(function() return game:HttpGet(url, true) end)
+    if not ok or type(src) ~= "string" or #src < 200 then return nil end
+    local chunk = (get_loader())(src)
+    local ok2, lib = pcall(chunk)
+    if not ok2 or type(lib) ~= "table" or not lib.CreateWindow then return nil end
+    return lib
+end
+
+local Rayfield = try_load("https://sirius.menu/rayfield")
+               or try_load("https://raw.githubusercontent.com/shlexware/Rayfield/main/source")
+assert(Rayfield, "Failed to load Rayfield.")
+
+local Window = Rayfield:CreateWindow({
+    Name = "Wildpads Utility Hub",
+    LoadingTitle = "Creating Window...",
+    LoadingSubtitle = "Wildpads",
+    ConfigurationSaving = { Enabled = false },
+})
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local lp = Players.LocalPlayer
+
+local function waitChar()
+    if lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") then
+        return lp.Character, lp.Character.HumanoidRootPart
+    end
+    lp.CharacterAdded:Wait()
+    task.wait(.1)
+    return lp.Character, lp.Character:WaitForChild("HumanoidRootPart")
+end
+
+local CURRENCY_NAMES = {"Gold","Coins","Coin","Money","Cash","Geld","Balance"}
+local function first_number(s)
+    if typeof(s) ~= "string" then return nil end
+    local token = string.match(s, "%d[%d,%.]*")
+    if not token then return nil end
+    token = token:gsub("%.", ""):gsub(",", "")
+    return tonumber(token)
+end
+
+local function getBalance()
+    local ls = lp:FindFirstChild("leaderstats")
+    if ls then
+        for _,k in ipairs(CURRENCY_NAMES) do
+            local it = ls:FindChild(k) or ls:FindFirstChild(k)
+            if it and tonumber(it.Value) then
+                return tonumber(it.Value)
+            end
+        end
+    end
+    local pg = lp:FindFirstChildOfClass("PlayerGui")
+    if pg then
+        for _,d in ipairs(pg:GetDescendants()) do
+            if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Text then
+                local t = (d.Text or ""):lower()
+                local n = (d.Name or ""):lower()
+                if t:find("coin") or t:find("gold") or n:find("coin") or n:find("gold") then
+                    local v = first_number(d.Text)
+                    if v then return v end
+                end
+            end
+        end
+    end
+    return 0
+end
+
+local function getWildpadsFolder()
+    local ws = workspace
+    return ws:FindFirstChild("Wildpads") or ws:FindFirstChild("WildPets") or ws:FindFirstChild("Wilds")
+end
+
+local function getHomeBasePart()
+    local worlds = workspace:FindFirstChild("Worlds")
+    if not worlds then return nil end
+    local my = worlds:FindFirstChild(lp.Name)
+    if not my then return nil end
+    local tiles = my:FindFirstChild("Tiles") or my
+    local target = tiles:FindFirstChild("1|1")
+    if not target then
+        for _,c in ipairs(tiles:GetChildren()) do if tostring(c.Name):find("1|1",1,true) then target=c break end end
+    end
+    if not target then return nil end
+    if target:IsA("BasePart") then return target end
+    if target:IsA("Model") then return target.PrimaryPart or target:FindFirstChildWhichIsA("BasePart", true) end
+    return target:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function tpTo(cf)
+    local _, hrp = waitChar()
+    hrp.CFrame = cf
+end
+
+local function tpHome()
+    local p = getHomeBasePart()
+    if p then tpTo(p.CFrame * CFrame.new(0,5,0)) return true end
+    return false
+end
+
+local function readPetInfo(container)
+    if not container then return nil end
+    local info = { model = container, price=nil, name=nil, tier=nil, prompt=nil, posPart=nil }
+    local priceText, nameText, tierText
+    for _,d in ipairs(container:GetDescendants()) do
+        if not info.prompt and d:IsA("ProximityPrompt") then info.prompt = d end
+        if not info.posPart and (d:IsA("Attachment") or d:IsA("BasePart")) and (d.Name:lower():find("prompt") or d.Name:lower():find("root")) then
+            info.posPart = d
+        end
+        if d:IsA("TextLabel") then
+            local dn = (d.Name or ""):lower()
+            local pn = (d.Parent and d.Parent.Name or ""):lower()
+            if not nameText and (dn:find("namelabel") or dn:find("title") or dn=="name") then nameText = d.Text end
+            if not tierText and (dn:find("tierlabel") or dn:find("rarity") or dn:find("grade")) then tierText = d.Text end
+            if not priceText and (dn:find("price") or pn:find("priceframe")) then priceText = d.Text end
+        end
+    end
+    info.name = nameText
+    info.tier = tierText
+    info.price = first_number(priceText or "")
+    if not info.posPart then
+        local root = container:FindFirstChild("Root") or container:FindFirstChildWhichIsA("BasePart", true)
+        info.posPart = root
+    end
+    if not info.price then
+        for _,d in ipairs(container:GetDescendants()) do
+            if d:IsA("TextLabel") then
+                local dn = (d.Name or ""):lower()
+                local pn = (d.Parent and d.Parent.Name or ""):lower()
+                if dn:find("price") or pn:find("price") then
+                    local v = first_number(d.Text)
+                    if v then info.price = v break end
+                end
+            end
+        end
+    end
+    if info.price then return info end
+    return nil
+end
+
+local function listAllPets()
+    local f = getWildpadsFolder()
+    if not f then return {} end
+    local arr = {}
+    for _,child in ipairs(f:GetChildren()) do
+        local i = readPetInfo(child)
+        if i then table.insert(arr, i) end
+    end
+    table.sort(arr, function(a,b) return (a.price or math.huge) < (b.price or math.huge) end)
+    return arr
+end
+
+local ALWAYS_SAFE_TELEPORT = true
+local function activatePrompt(info, doHomeAfter)
+    if not info or not info.prompt then return false, "no prompt" end
+    local _, hrp = waitChar()
+    if ALWAYS_SAFE_TELEPORT and info.posPart then
+        local cf
+        if info.posPart:IsA("Attachment") then
+            cf = CFrame.new(info.posPart.WorldPosition)
+        elseif info.posPart:IsA("BasePart") then
+            cf = info.posPart.CFrame * CFrame.new(0, 3, 0)
+        end
+        if cf then hrp.CFrame = cf task.wait(0.15) end
+    end
+    local prompt = info.prompt
+    local oldHold, oldMax = prompt.HoldDuration, prompt.MaxActivationDistance
+    prompt.HoldDuration = 0
+    prompt.MaxActivationDistance = math.max(100, oldMax)
+    local ok = pcall(function() if fireproximityprompt then fireproximityprompt(prompt) end end)
+    prompt.HoldDuration = oldHold
+    prompt.MaxActivationDistance = oldMax
+    if doHomeAfter then tpHome() end
+    return ok
+end
+
+local KNOWN_TIERS = {"All","Common","Uncommon","Rare","Epic","Legendary","Mythic","Godly","Gold"}
+local function tierPassMulti(selectedSet, info)
+    if not selectedSet or next(selectedSet) == nil or selectedSet["All"] then
+        return true
+    end
+    local t = (info.tier or ""):lower()
+    for opt,_ in pairs(selectedSet) do
+        if t:find(opt:lower(), 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local tabPlayer = Window:CreateTab("Player")
+tabPlayer:CreateSlider({
+    Name = "WalkSpeed", Range = {16,200}, Increment = 1, CurrentValue = 16,
+    Callback = function(v) local h=lp.Character and lp.Character:FindFirstChildOfClass("Humanoid"); if h then h.WalkSpeed=v end end
+})
+tabPlayer:CreateSlider({
+    Name = "JumpPower", Range = {50,250}, Increment = 1, CurrentValue = 50,
+    Callback = function(v) local h=lp.Character and lp.Character:FindFirstChildOfClass("Humanoid"); if h then h.JumpPower=v end end
+})
+local noclip=false
+tabPlayer:CreateToggle({Name="NoClip", CurrentValue=false, Callback=function(v) noclip=v end})
+task.spawn(function()
+    while task.wait() do
+        if not noclip then continue end
+        local ch=lp.Character
+        if ch then for _,p in ipairs(ch:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end
+    end
+end)
+
+local tabESP = Window:CreateTab("ESP")
+local ESP_ENABLED = false
+local SHOW_NAME, SHOW_TIER, SHOW_PRICE = true, true, true
+local PAD_ESPs = {}
+local TIER_COLORS = {
+    common     = Color3.fromRGB(200,200,200),
+    uncommon   = Color3.fromRGB(75,200,75),
+    rare       = Color3.fromRGB(30,144,255),
+    epic       = Color3.fromRGB(170,50,255),
+    legendary  = Color3.fromRGB(255,170,0),
+    mythic     = Color3.fromRGB(255,60,60),
+    godly      = Color3.fromRGB(255,100,180),
+    gold       = Color3.fromRGB(255,215,0),
+}
+local function colorForTier(t)
+    t = (t or ""):lower()
+    for k,c in pairs(TIER_COLORS) do if t:find(k,1,true) then return c end end
+    return Color3.new(1,1,1)
+end
+
+local espSelectedSet = { ["All"] = true }
+local function setESPFromList(list)
+    espSelectedSet = {}
+    if type(list) ~= "table" then list = {list} end
+    for _,opt in ipairs(list) do espSelectedSet[opt] = true end
+end
+
+tabESP:CreateDropdown({
+    Name = "ESP Tier Filter (Multi-select)",
+    Options = KNOWN_TIERS,
+    CurrentOption = {"All"},
+    MultipleOptions = true,
+    Callback = function(opts) setESPFromList(opts) end
+})
+
+local function clearESP()
+    for _,pack in pairs(PAD_ESPs) do
+        pcall(function() if pack.hl then pack.hl:Destroy() end end)
+        pcall(function() if pack.bb then pack.bb:Destroy() end end)
+    end
+    PAD_ESPs = {}
+end
+
+tabESP:CreateToggle({
+    Name = "Enable ESP",
+    CurrentValue = false,
+    Callback = function(v)
+        ESP_ENABLED = v
+        if not v then clearESP() end
+    end
+})
+
+tabESP:CreateToggle({
+    Name = "Show Name",
+    CurrentValue = true,
+    Callback = function(v)
+        SHOW_NAME = v
+        for _,pack in pairs(PAD_ESPs) do if pack.labels and pack.labels[1] then pack.labels[1].Visible = v end end
+    end
+})
+tabESP:CreateToggle({
+    Name = "Show Tier",
+    CurrentValue = true,
+    Callback = function(v)
+        SHOW_TIER = v
+        for _,pack in pairs(PAD_ESPs) do if pack.labels and pack.labels[2] then pack.labels[2].Visible = v end end
+    end
+})
+tabESP:CreateToggle({
+    Name = "Show Price",
+    CurrentValue = true,
+    Callback = function(v)
+        SHOW_PRICE = v
+        for _,pack in pairs(PAD_ESPs) do if pack.labels and pack.labels[3] then pack.labels[3].Visible = v end end
+    end
+})
+
+local function ensurePadESP(info)
+    if not info or not info.model then return end
+    if PAD_ESPs[info.model] then return end
+    local hl = Instance.new("Highlight")
+    hl.FillTransparency = 1
+    hl.OutlineTransparency = 0
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Adornee = info.model
+    hl.Parent = info.model
+    hl.OutlineColor = colorForTier(info.tier)
+
+    local adornee = info.posPart
+    if not adornee then adornee = info.model:FindFirstChildWhichIsA("BasePart", true) or info.model end
+
+    local bb = Instance.new("BillboardGui")
+    bb.Size = UDim2.fromOffset(260, 90)
+    bb.StudsOffsetWorldSpace = Vector3.new(0, 4, 0)
+    bb.AlwaysOnTop = true
+    bb.MaxDistance = 10000
+    bb.LightInfluence = 0
+    bb.Adornee = adornee
+    bb.Parent = info.model
+
+    local frame = Instance.new("Frame", bb)
+    frame.BackgroundTransparency = 1
+    frame.Size = UDim2.fromScale(1,1)
+    local list = Instance.new("UIListLayout", frame)
+    list.Padding = UDim.new(0,2)
+    list.SortOrder = Enum.SortOrder.LayoutOrder
+
+    local function mk(text, bold)
+        local tl = Instance.new("TextLabel")
+        tl.BackgroundTransparency = 1
+        tl.Text = text
+        tl.Font = bold and Enum.Font.SourceSansBold or Enum.Font.SourceSansSemibold
+        tl.TextScaled = true
+        tl.TextWrapped = true
+        tl.TextColor3 = colorForTier(info.tier)
+        tl.TextStrokeTransparency = 0.4
+        tl.Size = UDim2.new(1,0,0,28)
+        tl.Parent = frame
+        return tl
+    end
+
+    local l1 = mk((info.name or info.model.Name), true)
+    local l2 = mk(("Tier: %s"):format(info.tier or "?"))
+    local l3 = mk(("Price: %s"):format(tostring(info.price or "?")))
+    l1.Visible = SHOW_NAME
+    l2.Visible = SHOW_TIER
+    l3.Visible = SHOW_PRICE
+
+    PAD_ESPs[info.model] = {hl=hl, bb=bb, labels={l1,l2,l3}, tier=(info.tier or "")}
+end
+
+task.spawn(function()
+    while task.wait(0.25) do
+        if not ESP_ENABLED then continue end
+        local pets = listAllPets()
+        local allowed = {}
+        for _,info in ipairs(pets) do
+            if tierPassMulti(espSelectedSet, info) then
+                ensurePadESP(info)
+                allowed[info.model] = true
+            end
+        end
+        for mdl,pack in pairs(PAD_ESPs) do
+            if not mdl.Parent or not allowed[mdl] then
+                pcall(function() if pack.hl then pack.hl:Destroy() end end)
+                pcall(function() if pack.bb then pack.bb:Destroy() end end)
+                PAD_ESPs[mdl]=nil
+            end
+        end
+    end
+end)
+
+local tabAuto = Window:CreateTab("Auto")
+local selectedTiersSet = { ["All"] = true }
+local function setFromList(list)
+    selectedTiersSet = {}
+    if type(list) ~= "table" then list = {list} end
+    for _,opt in ipairs(list) do selectedTiersSet[opt] = true end
+end
+
+tabAuto:CreateDropdown({
+    Name = "Tier Filter (Multi-select)",
+    Options = {"All","Common","Uncommon","Rare","Epic","Legendary","Mythic","Godly","Gold"},
+    CurrentOption = {"All"},
+    MultipleOptions = true,
+    Callback = function(opts) setFromList(opts) end
+})
+
+local autoAff = false
+tabAuto:CreateToggle({
+    Name = "Auto-Buy Affordable (checks balance)",
+    CurrentValue = false,
+    Callback = function(v) autoAff = v end
+})
+
+local function findCheapestAffordable(pets, selectedSet)
+    local bal = getBalance()
+    local best
+    for _,p in ipairs(pets) do
+        if p.price and p.price <= bal and tierPassMulti(selectedSet, p) then
+            best = p; break
+        end
+    end
+    return best
+end
+
+task.spawn(function()
+    while task.wait(0.6) do
+        local pets = listAllPets()
+        if autoAff then
+            local choice = findCheapestAffordable(pets, selectedTiersSet)
+            if choice then
+                local before = getBalance()
+                if choice.price and choice.price <= before then
+                    local ok = activatePrompt(choice, true)
+                    task.wait(0.35)
+                    local after = getBalance()
+                    if ok and after < before then
+                        Rayfield:Notify({Title="Auto-Buy", Content="Purchased", Duration=1.5})
+                    end
+                end
+            end
+        end
+    end
+end)
