@@ -13,9 +13,9 @@ local Rayfield = try_load("https://sirius.menu/rayfield")
 assert(Rayfield, "Failed to load Rayfield.")
 
 local Window = Rayfield:CreateWindow({
-    Name = "Wildpads Utility Hub",
-    LoadingTitle = "Creating Window...",
-    LoadingSubtitle = "Wildpads",
+    Name = "My Pet Farm by jlcfg",
+    LoadingTitle = "My Pet Farm",
+    LoadingSubtitle = "by jlcfg",
     ConfigurationSaving = { Enabled = false },
 })
 
@@ -236,7 +236,7 @@ local function setESPFromList(list)
 end
 
 tabESP:CreateDropdown({
-    Name = "ESP Tier Filter (Multi-select)",
+    Name = "ESP Tier Filter (Multi select)",
     Options = KNOWN_TIERS,
     CurrentOption = {"All"},
     MultipleOptions = true,
@@ -369,7 +369,7 @@ local function setFromList(list)
 end
 
 tabAuto:CreateDropdown({
-    Name = "Tier Filter (Multi-select)",
+    Name = "Tier Filter (Multi select)",
     Options = {"All","Common","Uncommon","Rare","Epic","Legendary","Mythic","Godly","Gold"},
     CurrentOption = {"All"},
     MultipleOptions = true,
@@ -378,7 +378,7 @@ tabAuto:CreateDropdown({
 
 local autoAff = false
 tabAuto:CreateToggle({
-    Name = "Auto-Buy Affordable (checks balance)",
+    Name = "Auto Buy Affordable (checks balance)",
     CurrentValue = false,
     Callback = function(v) autoAff = v end
 })
@@ -406,7 +406,7 @@ task.spawn(function()
                     task.wait(0.35)
                     local after = getBalance()
                     if ok and after < before then
-                        Rayfield:Notify({Title="Auto-Buy", Content="Purchased", Duration=1.5})
+                        Rayfield:Notify({Title="Auto Buy", Content="Purchased", Duration=1.5})
                     end
                 end
             end
