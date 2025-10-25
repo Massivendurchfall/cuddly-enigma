@@ -20,7 +20,6 @@ local Window = Rayfield:CreateWindow({
 })
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local lp = Players.LocalPlayer
 
 local function waitChar()
@@ -45,7 +44,7 @@ local function getBalance()
     local ls = lp:FindFirstChild("leaderstats")
     if ls then
         for _,k in ipairs(CURRENCY_NAMES) do
-            local it = ls:FindChild(k) or ls:FindFirstChild(k)
+            local it = ls:FindFirstChild(k)
             if it and tonumber(it.Value) then
                 return tonumber(it.Value)
             end
@@ -80,7 +79,9 @@ local function getHomeBasePart()
     local tiles = my:FindFirstChild("Tiles") or my
     local target = tiles:FindFirstChild("1|1")
     if not target then
-        for _,c in ipairs(tiles:GetChildren()) do if tostring(c.Name):find("1|1",1,true) then target=c break end end
+        for _,c in ipairs(tiles:GetChildren()) do
+            if tostring(c.Name):find("1|1",1,true) then target=c break end
+        end
     end
     if not target then return nil end
     if target:IsA("BasePart") then return target end
@@ -151,19 +152,18 @@ local function listAllPets()
     return arr
 end
 
-local ALWAYS_SAFE_TELEPORT = true
-local function activatePrompt(info, doHomeAfter)
-    if not info or not info.prompt then return false, "no prompt" end
+local function teleportAndActivatePrompt(info)
+    if not info or not info.prompt then return false end
     local _, hrp = waitChar()
-    if ALWAYS_SAFE_TELEPORT and info.posPart then
-        local cf
+    local cf
+    if info.posPart then
         if info.posPart:IsA("Attachment") then
             cf = CFrame.new(info.posPart.WorldPosition)
         elseif info.posPart:IsA("BasePart") then
             cf = info.posPart.CFrame * CFrame.new(0, 3, 0)
         end
-        if cf then hrp.CFrame = cf task.wait(0.15) end
     end
+    if cf then hrp.CFrame = cf task.wait(0.15) end
     local prompt = info.prompt
     local oldHold, oldMax = prompt.HoldDuration, prompt.MaxActivationDistance
     prompt.HoldDuration = 0
@@ -171,7 +171,6 @@ local function activatePrompt(info, doHomeAfter)
     local ok = pcall(function() if fireproximityprompt then fireproximityprompt(prompt) end end)
     prompt.HoldDuration = oldHold
     prompt.MaxActivationDistance = oldMax
-    if doHomeAfter then tpHome() end
     return ok
 end
 
@@ -378,7 +377,7 @@ tabAuto:CreateDropdown({
 
 local autoAff = false
 tabAuto:CreateToggle({
-    Name = "Auto Buy Affordable (checks balance)",
+    Name = "Auto Buy Affordable",
     CurrentValue = false,
     Callback = function(v) autoAff = v end
 })
@@ -402,10 +401,11 @@ task.spawn(function()
             if choice then
                 local before = getBalance()
                 if choice.price and choice.price <= before then
-                    local ok = activatePrompt(choice, true)
+                    local ok = teleportAndActivatePrompt(choice)
                     task.wait(0.35)
                     local after = getBalance()
                     if ok and after < before then
+                        tpHome()
                         Rayfield:Notify({Title="Auto Buy", Content="Purchased", Duration=1.5})
                     end
                 end
