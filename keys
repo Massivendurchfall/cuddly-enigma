@@ -1,0 +1,745 @@
+local Players=game:GetService("Players")
+local RunService=game:GetService("RunService")
+local Workspace=game:GetService("Workspace")
+local UserInputService=game:GetService("UserInputService")
+local StarterGui=game:GetService("StarterGui")
+local VirtualUser=game:GetService("VirtualUser")
+
+local LP=Players.LocalPlayer
+local Rayfield=loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+
+local function alive(o) return pcall(function() return o and o.Parent end) and o.Parent~=nil end
+local function firstPart(x)
+    if not alive(x) then return nil end
+    if x:IsA("BasePart") then return x end
+    if x:IsA("Model") then
+        if x.PrimaryPart and x.PrimaryPart:IsA("BasePart") and alive(x.PrimaryPart) then return x.PrimaryPart end
+        local p=x:FindFirstChildWhichIsA("BasePart",true); if p then return p end
+    end
+    local h=x:FindFirstChild("Handle") or x:FindFirstChildWhichIsA("BasePart",true)
+    if h then return h end
+    return nil
+end
+local function ensureHL(model,name,color)
+    local h=model:FindFirstChild(name)
+    if not h then
+        h=Instance.new("Highlight")
+        h.Name=name
+        h.Adornee=model
+        h.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
+        h.FillTransparency=0.5
+        h.OutlineTransparency=0
+        h.Parent=model
+    end
+    h.FillColor=color
+    h.OutlineColor=color
+    return h
+end
+local function ensureBillboard(part,name,text,color)
+    local g=part:FindFirstChild(name)
+    if not g then
+        g=Instance.new("BillboardGui")
+        g.Name=name
+        g.AlwaysOnTop=true
+        g.Size=UDim2.new(0,200,0,36)
+        g.StudsOffset=Vector3.new(0,3,0)
+        g.Parent=part
+        local l=Instance.new("TextLabel")
+        l.Name="Label"
+        l.BackgroundTransparency=1
+        l.Size=UDim2.new(1,0,1,0)
+        l.Font=Enum.Font.GothamBold
+        l.Text=text
+        l.TextSize=14
+        l.TextColor3=color
+        l.TextStrokeTransparency=0
+        l.TextStrokeColor3=Color3.new(0,0,0)
+        l.Parent=g
+    else
+        local l=g:FindFirstChild("Label"); if l then l.Text=text l.TextColor3=color end
+    end
+end
+local function clearChild(o,n) local c=o and o:FindFirstChild(n); if c then c:Destroy() end end
+local function clearAllByName(n) for _,d in ipairs(game:GetDescendants()) do if d.Name==n then pcall(function() d:Destroy() end) end end end
+
+local Window=Rayfield:CreateWindow({Name="Keys Script",LoadingTitle="Keys Script",LoadingSubtitle="made by JLCFG",ConfigurationSaving={Enabled=true,FolderName="KeysSuite",FileName="config"},KeySystem=false})
+local TabPlayer=Window:CreateTab("Player")
+local TabESP=Window:CreateTab("ESP")
+local TabAuto=Window:CreateTab("Auto")
+
+local speedValue=16
+local speedEnabled=false
+local speedHumanoid=nil
+local speedConn=nil
+local function bindHumanoid(h)
+    speedHumanoid=h
+    if speedConn then speedConn:Disconnect() end
+    speedConn=h:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+        if speedEnabled and speedHumanoid and speedHumanoid.Parent and speedHumanoid.WalkSpeed~=speedValue then
+            speedHumanoid.WalkSpeed=speedValue
+        end
+    end)
+end
+local function onChar(c)
+    local h=c:FindFirstChildOfClass("Humanoid") or c:WaitForChild("Humanoid",10)
+    if h then bindHumanoid(h) end
+end
+if LP.Character then onChar(LP.Character) end
+LP.CharacterAdded:Connect(onChar)
+
+local noclipConn=nil
+local function setNoclip(state)
+    if state and not noclipConn then
+        noclipConn=RunService.Stepped:Connect(function()
+            local c=LP.Character; if not c then return end
+            for _,p in ipairs(c:GetDescendants()) do
+                if p:IsA("BasePart") then p.CanCollide=false end
+            end
+        end)
+    elseif not state and noclipConn then
+        noclipConn:Disconnect(); noclipConn=nil
+        local c=LP.Character
+        if c then for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=true end end end
+    end
+end
+
+local flyConn=nil
+local function dirInput()
+    local v=Vector3.zero
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then v=v+Vector3.new(0,0,-1) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then v=v+Vector3.new(0,0,1) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then v=v+Vector3.new(-1,0,0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then v=v+Vector3.new(1,0,0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then v=v+Vector3.new(0,1,0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then v=v+Vector3.new(0,-1,0) end
+    return v
+end
+local function setFly(state)
+    if state and not flyConn then
+        flyConn=RunService.Heartbeat:Connect(function()
+            local c=LP.Character; if not c then return end
+            local hrp=c:FindFirstChild("HumanoidRootPart"); local hum=c:FindFirstChildOfClass("Humanoid")
+            if not hrp or not hum then return end
+            hum.PlatformStand=true
+            local cam=Workspace.CurrentCamera
+            local v=dirInput()
+            if v.Magnitude>0 then
+                v=v.Unit
+                local look=cam.CFrame.LookVector
+                local right=cam.CFrame.RightVector
+                local up=Vector3.new(0,1,0)
+                local move=(right*v.X+up*v.Y+look*-v.Z)*80
+                hrp.AssemblyLinearVelocity=Vector3.new(move.X,move.Y,move.Z)
+            else
+                hrp.AssemblyLinearVelocity=hrp.AssemblyLinearVelocity*0.9
+            end
+        end)
+    elseif not state and flyConn then
+        flyConn:Disconnect(); flyConn=nil
+        local c=LP.Character; local hum=c and c:FindFirstChildOfClass("Humanoid")
+        if hum then hum.PlatformStand=false end
+    end
+end
+
+local antiAfkConn=nil
+local function setAntiAfk(state)
+    if state and not antiAfkConn then
+        antiAfkConn=LP.Idled:Connect(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new(),Workspace.CurrentCamera.CFrame)
+        end)
+    elseif not state and antiAfkConn then
+        antiAfkConn:Disconnect()
+        antiAfkConn=nil
+    end
+end
+
+TabPlayer:CreateSection("Movement")
+TabPlayer:CreateToggle({Name="Speed Lock",CurrentValue=false,Flag="SpeedLock",Callback=function(s)
+    speedEnabled=s
+    if s and speedHumanoid and speedHumanoid.Parent then speedHumanoid.WalkSpeed=speedValue end
+end})
+TabPlayer:CreateSlider({Name="Walk Speed",Range={0,200},Increment=1,CurrentValue=speedValue,Flag="WalkSpeed",Callback=function(v)
+    speedValue=v
+    if speedEnabled and speedHumanoid and speedHumanoid.Parent then speedHumanoid.WalkSpeed=speedValue end
+end})
+TabPlayer:CreateToggle({Name="Noclip",CurrentValue=false,Flag="Noclip",Callback=setNoclip})
+TabPlayer:CreateToggle({Name="Fly",CurrentValue=false,Flag="Fly",Callback=setFly})
+TabPlayer:CreateToggle({Name="Anti-AFK",CurrentValue=false,Flag="AntiAFK",Callback=setAntiAfk})
+
+TabPlayer:CreateSection("Safety")
+local safetyEnabled=true
+local safetyActive=false
+local safetyReturnCF=nil
+local function hrp()
+    local c=LP.Character; if not c then return nil end
+    return c:FindFirstChild("HumanoidRootPart")
+end
+local function tp(cf)
+    local r=hrp(); if r then r.CFrame=cf end
+end
+local function monstersRoot() local g=Workspace:FindFirstChild("Game"); return g and g:FindFirstChild("GamePlayers") end
+local function isPlayerCharacter(m) return Players:GetPlayerFromCharacter(m)~=nil end
+local function nameHasParens(n) return n and string.find(n,"%b()")~=nil end
+local function isMonsterModel(m)
+    if not (m and m:IsA("Model")) then return false end
+    if isPlayerCharacter(m) then return false end
+    if not m:FindFirstChildOfClass("Humanoid") then return false end
+    return nameHasParens(m.Name)
+end
+local function monstersPositions()
+    local t={}
+    local root=monstersRoot()
+    if not root then return t end
+    for _,m in ipairs(root:GetChildren()) do
+        if isMonsterModel(m) then
+            local p=firstPart(m)
+            if p then table.insert(t,p.Position) end
+        end
+    end
+    return t
+end
+local function nearestMonsterDist(p)
+    local best=math.huge
+    for _,mp in ipairs(monstersPositions()) do
+        local d=(mp-p).Magnitude
+        if d<best then best=d end
+    end
+    return best
+end
+local function triggerSafety()
+    if safetyActive or not safetyEnabled then return end
+    local r=hrp(); if not r then return end
+    safetyActive=true
+    safetyReturnCF=r.CFrame
+    tp(r.CFrame+Vector3.new(0,60,0))
+    task.delay(5,function()
+        if safetyReturnCF then tp(safetyReturnCF) end
+        safetyActive=false
+    end)
+end
+TabPlayer:CreateToggle({Name="Safety Escape",CurrentValue=true,Flag="SafetyEscape",Callback=function(s) safetyEnabled=s end})
+
+local playerESPEnabled=false
+local monsterESPEnabled=false
+local keysESPEnabled=false
+local doorsESPEnabled=false
+local autoPumpkins=false
+local autoGifts=false
+local autoJoin=false
+local autoFarm=false
+
+local function ensureMonsterTags()
+    local root=monstersRoot(); if not root then return end
+    for _,m in ipairs(root:GetChildren()) do
+        if isMonsterModel(m) then
+            if monsterESPEnabled then
+                ensureHL(m,"KS_MonHL",Color3.fromRGB(255,60,60))
+                local head=m:FindFirstChild("Head") or m:FindFirstChild("HumanoidRootPart")
+                if head then ensureBillboard(head,"KS_MonBB",m.Name,Color3.fromRGB(255,60,60)) end
+            else
+                clearChild(m,"KS_MonHL")
+                local head=m:FindFirstChild("Head") or m:FindFirstChild("HumanoidRootPart"); if head then clearChild(head,"KS_MonBB") end
+            end
+        end
+    end
+end
+
+local keyHooks={}
+local keyEntries=setmetatable({},{__mode="k"})
+local function isKeyNode(n) return n and (n.Name=="Point_1" or n.Name=="SpawnPoint_1") end
+local function hasKeyPrompt(n)
+    if not alive(n) then return false end
+    if n:FindFirstChild("InteractPrompt",true) then return true end
+    if n:FindFirstChildWhichIsA("ProximityPrompt",true) then return true end
+    return false
+end
+local function partForKeyNode(node)
+    local p=node:FindFirstChildWhichIsA("BasePart",true); if p then return p end
+    if node.Parent then
+        local s=node.Parent:FindFirstChildWhichIsA("BasePart",true); if s then return s end
+    end
+    return nil
+end
+local function enableKeyMark(node)
+    if not keysESPEnabled then return end
+    local part=partForKeyNode(node); if not part then return end
+    ensureBillboard(part,"KS_KeyBB","Key",Color3.fromRGB(0,170,255))
+    keyEntries[node]=part
+end
+local function disableKeyMark(node)
+    local part=keyEntries[node] or partForKeyNode(node)
+    if part then clearChild(part,"KS_KeyBB") end
+    keyEntries[node]=nil
+end
+local function hookKeyNode(node)
+    if keyHooks[node] then return end
+    local a=node.DescendantAdded:Connect(function(ch)
+        if ch.Name=="InteractPrompt" or ch:IsA("ProximityPrompt") then if keysESPEnabled then enableKeyMark(node) end end
+    end)
+    local b=node.DescendantRemoving:Connect(function(ch)
+        if ch.Name=="InteractPrompt" or ch:IsA("ProximityPrompt") then disableKeyMark(node) end
+    end)
+    keyHooks[node]={a,b}
+    if hasKeyPrompt(node) and keysESPEnabled then enableKeyMark(node) end
+end
+local function unhookKeyNode(node)
+    local cs=keyHooks[node]
+    if cs then for _,c in ipairs(cs) do pcall(function() c:Disconnect() end) end keyHooks[node]=nil end
+    disableKeyMark(node)
+end
+
+local doorHooks={}
+local doorParts=setmetatable({},{__mode="k"})
+local function isDoorModel(inst) return inst and inst:IsA("Model") and inst.Name:match("^LockDoor_")~=nil end
+local function doorPrompt(m)
+    local cp=m:FindFirstChild("ControlPart"); if not cp then return nil end
+    return cp:FindFirstChild("InteractPrompt") or cp:FindFirstChildWhichIsA("ProximityPrompt",true)
+end
+local function doorMainPart(m)
+    local p=firstPart(m); if p then return p end
+    local cp=m:FindFirstChild("ControlPart"); if cp and cp:IsA("BasePart") then return cp end
+    return nil
+end
+local function tagDoor(m)
+    if not doorsESPEnabled then
+        clearChild(m,"KS_DoorHL")
+        local p=doorParts[m] or doorMainPart(m); if p then clearChild(p,"KS_DoorBB") end
+        return
+    end
+    ensureHL(m,"KS_DoorHL",Color3.fromRGB(255,170,0))
+    local p=doorMainPart(m); if p then ensureBillboard(p,"KS_DoorBB","Door",Color3.fromRGB(255,170,0)); doorParts[m]=p end
+end
+local function hookDoor(m)
+    if doorHooks[m] then return end
+    tagDoor(m)
+    local a=m.AncestryChanged:Connect(function(_,p) if not p then clearChild(m,"KS_DoorHL"); local dp=doorParts[m] or doorMainPart(m); if dp then clearChild(dp,"KS_DoorBB") end doorHooks[m]=nil doorParts[m]=nil end end)
+    doorHooks[m]=a
+end
+
+local function attachFromIH(ih)
+    if not ih or not ih:IsA("Folder") then return end
+    local isf=ih:FindFirstChild("ItemSpawn")
+    if isf then
+        for _,sp in ipairs(isf:GetChildren()) do
+            local p1=sp:FindFirstChild("Point_1"); if p1 then hookKeyNode(p1) end
+        end
+    end
+    for _,dc in ipairs(ih:GetDescendants()) do
+        if dc.Name=="DrawerContainer" then
+            for _,d in ipairs(dc:GetDescendants()) do
+                if d.Name=="SpawnPoint_1" or d.Name=="Point_1" then hookKeyNode(d) end
+            end
+        end
+    end
+    local ip=ih:FindFirstChild("ItemPlace")
+    if ip then
+        for _,d in ipairs(ip:GetChildren()) do if isDoorModel(d) then hookDoor(d) end end
+    end
+end
+
+local maps=Workspace:FindFirstChild("Maps")
+if maps then
+    for _,d in ipairs(maps:GetDescendants()) do if d.Name=="ItemHuntFolder" then attachFromIH(d) end end
+    maps.DescendantAdded:Connect(function(d)
+        if not alive(d) then return end
+        if d.Name=="ItemHuntFolder" then attachFromIH(d) end
+        if d.Name=="ItemSpawn" and d.Parent and d.Parent.Name=="ItemHuntFolder" then
+            for _,sp in ipairs(d:GetChildren()) do local p1=sp:FindFirstChild("Point_1"); if p1 then hookKeyNode(p1) end end
+        end
+        if d.Name=="DrawerContainer" then
+            for _,x in ipairs(d:GetDescendants()) do if x.Name=="SpawnPoint_1" or x.Name=="Point_1" then hookKeyNode(x) end end
+        end
+        if isDoorModel(d) then hookDoor(d) end
+    end)
+    maps.DescendantRemoving:Connect(function(d)
+        if isKeyNode(d) then unhookKeyNode(d) end
+        if isDoorModel(d) then
+            if doorHooks[d] then pcall(function() doorHooks[d]:Disconnect() end) doorHooks[d]=nil end
+            clearChild(d,"KS_DoorHL")
+            local dp=doorParts[d] or doorMainPart(d); if dp then clearChild(dp,"KS_DoorBB") end
+            doorParts[d]=nil
+        end
+    end)
+end
+
+local function availableKeys()
+    local result={}
+    for node,_ in pairs(keyHooks) do
+        if alive(node) and hasKeyPrompt(node) then
+            local p=partForKeyNode(node)
+            if p then
+                table.insert(result,{node=node,part=p})
+            end
+        end
+    end
+    return result
+end
+
+local function availableDoors()
+    local res={}
+    if not maps then return res end
+    for _,ih in ipairs(maps:GetDescendants()) do
+        if ih.Name=="ItemHuntFolder" then
+            local ip=ih:FindFirstChild("ItemPlace")
+            if ip then
+                for _,m in ipairs(ip:GetChildren()) do
+                    if isDoorModel(m) then
+                        local pr=doorPrompt(m)
+                        local cp=m:FindFirstChild("ControlPart")
+                        local pp=cp and cp:IsA("BasePart") and cp or doorMainPart(m)
+                        if pr and cp and pp then
+                            table.insert(res,{model=m,prompt=pr,part=pp})
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return res
+end
+
+local function nearestKey()
+    local r=hrp(); if not r then return nil end
+    local list=availableKeys()
+    local best,bestd=nil,math.huge
+    for _,e in ipairs(list) do
+        local d=(e.part.Position-r.Position).Magnitude
+        if d<bestd then best=e bestd=d end
+    end
+    return best
+end
+
+local function anyDoor()
+    local list=availableDoors()
+    if #list==0 then return nil end
+    return list[math.random(1,#list)]
+end
+
+local function pressE(times,holdSeconds)
+    local vim=game:GetService("VirtualInputManager")
+    times=times or 1
+    for i=1,math.max(1,times) do
+        vim:SendKeyEvent(true,Enum.KeyCode.E,false,game)
+        task.wait(0.05)
+        vim:SendKeyEvent(false,Enum.KeyCode.E,false,game)
+        task.wait(0.05)
+        if safetyEnabled and not safetyActive then
+            local r=hrp(); if r and nearestMonsterDist(r.Position)<10 then triggerSafety() return end
+        end
+    end
+    if holdSeconds and holdSeconds>0 then
+        vim:SendKeyEvent(true,Enum.KeyCode.E,false,game)
+        local t0=os.clock()
+        while os.clock()-t0<holdSeconds do
+            if safetyEnabled and not safetyActive then
+                local r=hrp()
+                if r and nearestMonsterDist(r.Position)<10 then
+                    vim:SendKeyEvent(false,Enum.KeyCode.E,false,game)
+                    triggerSafety()
+                    while safetyActive do task.wait(0.1) end
+                    vim:SendKeyEvent(true,Enum.KeyCode.E,false,game)
+                end
+            end
+            task.wait(0.05)
+        end
+        vim:SendKeyEvent(false,Enum.KeyCode.E,false,game)
+    end
+end
+
+local function firePrompt(pp,hold)
+    if not pp then return end
+    if fireproximityprompt then
+        pcall(function() fireproximityprompt(pp,hold or 1) end)
+    else
+        pressE(1,hold)
+    end
+end
+
+local function tryTouch(part)
+    local r=hrp(); if not r or not part then return end
+    if firetouchinterest then
+        pcall(function() firetouchinterest(r,part,0) end)
+        task.wait(0.05)
+        pcall(function() firetouchinterest(r,part,1) end)
+    end
+end
+
+local function collectPumpkinsOnce()
+    if not maps then return end
+    for _,map in ipairs(maps:GetChildren()) do
+        local rei=map:FindFirstChild("RobloxEventItem")
+        if rei then
+            for _,h in ipairs(rei:GetChildren()) do
+                if h and h.Name=="HideItem" and h:IsA("BasePart") then
+                    local tt=h:FindFirstChildOfClass("TouchTransmitter")
+                    if tt then tryTouch(h) end
+                end
+            end
+        end
+    end
+end
+
+local function collectGiftsOnce()
+    local gameFolder=Workspace:FindFirstChild("Game")
+    if not gameFolder then return end
+    local pof=gameFolder:FindFirstChild("PlaceObjectFolder")
+    if not pof then return end
+    for _,box in ipairs(pof:GetChildren()) do
+        if box.Name=="MouseGiftBox" then
+            local collide=box:FindFirstChild("Collide")
+            if collide and collide:IsA("BasePart") and collide:FindFirstChildOfClass("TouchTransmitter") then
+                tryTouch(collide)
+            end
+        end
+    end
+end
+
+local lastJoinSignature=nil
+local cachedJoinBtn=nil
+local cachedJoinLabel=nil
+local nextScanAt=0
+
+local function joinHeaderVisible()
+    local pg=LP:FindFirstChild("PlayerGui"); if not pg then return false end
+    if cachedJoinLabel and cachedJoinLabel.Parent and cachedJoinLabel.Visible then return true end
+    local lbl=nil
+    local s1=pg:FindFirstChild("ScreenJoinGame",true)
+    if s1 then lbl=s1:FindFirstChild("Title",true) end
+    if not lbl then
+        for _,d in ipairs(pg:GetDescendants()) do
+            if d:IsA("TextLabel") then
+                local t=string.lower(d.Text or "")
+                if t:find("adventure is in progress") or t:find("join current match") then lbl=d break end
+            end
+        end
+    end
+    cachedJoinLabel=lbl
+    return lbl~=nil and lbl.Visible
+end
+
+local function findJoinButton()
+    local pg=LP:FindFirstChild("PlayerGui"); if not pg then return nil end
+    local b=nil
+    local s1=pg:FindFirstChild("ScreenJoinGame",true)
+    if s1 then b=s1:FindFirstChild("JoinBtn",true) end
+    if not b then
+        for _,d in ipairs(pg:GetDescendants()) do
+            if (d:IsA("TextButton") or d:IsA("ImageButton")) and d.Visible then
+                local t=""
+                if d:IsA("TextButton") then t=d.Text or "" end
+                local l=d:FindFirstChildWhichIsA("TextLabel"); if l and #l.Text>#t then t=l.Text end
+                t=string.lower(t or "")
+                local n=string.lower(d.Name or "")
+                if n=="joinbtn" or t:find("join") then b=d break end
+            end
+        end
+    end
+    return b
+end
+
+local function robustClick(btn)
+    if not btn or not btn.Parent or not btn.Visible then return end
+    local pos=btn.AbsolutePosition+btn.AbsoluteSize/2
+    local vim=game:GetService("VirtualInputManager")
+    pcall(function() btn:Activate() end)
+    pcall(function() if firesignal then firesignal(btn.MouseButton1Down) end end)
+    task.wait(0.01)
+    pcall(function() if firesignal then firesignal(btn.MouseButton1Up) end end)
+    pcall(function() if firesignal then firesignal(btn.MouseButton1Click) end end)
+    pcall(function() vim:SendMouseButtonEvent(pos.X,pos.Y,0,true,game,0) end)
+    task.wait(0.02)
+    pcall(function() vim:SendMouseButtonEvent(pos.X,pos.Y,0,false,game,0) end)
+end
+
+local function clickJoinButton()
+    if not autoJoin then return end
+    if time()<nextScanAt then
+        if cachedJoinBtn and cachedJoinBtn.Parent and cachedJoinBtn.Visible and joinHeaderVisible() then
+            local sig=tostring(cachedJoinBtn:GetDebugId())..":"..tostring(cachedJoinBtn.AbsolutePosition)..":"..tostring(cachedJoinBtn.AbsoluteSize)
+            if sig~=lastJoinSignature then
+                lastJoinSignature=sig
+                task.defer(robustClick,cachedJoinBtn)
+            end
+        end
+        return
+    end
+    nextScanAt=time()+1.2
+    if not joinHeaderVisible() then return end
+    cachedJoinBtn=findJoinButton()
+    if cachedJoinBtn and cachedJoinBtn.Visible then
+        local sig=tostring(cachedJoinBtn:GetDebugId())..":"..tostring(cachedJoinBtn.AbsolutePosition)..":"..tostring(cachedJoinBtn.AbsoluteSize)
+        if sig~=lastJoinSignature then
+            lastJoinSignature=sig
+            task.defer(robustClick,cachedJoinBtn)
+        end
+    end
+end
+
+TabESP:CreateSection("Players")
+TabESP:CreateToggle({Name="Player ESP",CurrentValue=false,Flag="ESP_Player",Callback=function(s)
+    playerESPEnabled=s
+    if s then
+        for _,pl in ipairs(Players:GetPlayers()) do if pl~=LP and pl.Character then ensureHL(pl.Character,"KS_PlayerHL",Color3.fromRGB(0,255,0)) end end
+    else
+        for _,pl in ipairs(Players:GetPlayers()) do if pl.Character then clearChild(pl.Character,"KS_PlayerHL") end end
+    end
+end})
+
+TabESP:CreateSection("Monsters")
+TabESP:CreateToggle({Name="Monster ESP",CurrentValue=false,Flag="ESP_Monster",Callback=function(s)
+    monsterESPEnabled=s
+    ensureMonsterTags()
+end})
+
+TabESP:CreateSection("Keys")
+TabESP:CreateToggle({Name="Keys ESP",CurrentValue=false,Flag="ESP_Keys",Callback=function(s)
+    keysESPEnabled=s
+    if not s then
+        for node,_ in pairs(keyEntries) do disableKeyMark(node) end
+        keyEntries=setmetatable({},{__mode="k"})
+        clearAllByName("KS_KeyBB")
+    else
+        for node,_ in pairs(keyHooks) do if hasKeyPrompt(node) then enableKeyMark(node) end end
+    end
+end})
+
+TabESP:CreateSection("Doors")
+TabESP:CreateToggle({Name="Door ESP",CurrentValue=false,Flag="ESP_Doors",Callback=function(s)
+    doorsESPEnabled=s
+    for m,_ in pairs(doorHooks) do if alive(m) and isDoorModel(m) then tagDoor(m) end end
+    if not s then
+        for m,p in pairs(doorParts) do if alive(m) then clearChild(m,"KS_DoorHL") end if p then clearChild(p,"KS_DoorBB") end end
+        clearAllByName("KS_DoorBB")
+    end
+end})
+
+TabAuto:CreateSection("Events")
+TabAuto:CreateToggle({Name="Auto-Collect Pumpkins",CurrentValue=false,Flag="AutoPumpkins",Callback=function(s) autoPumpkins=s end})
+TabAuto:CreateToggle({Name="Auto-Collect GiftBoxes",CurrentValue=false,Flag="AutoGifts",Callback=function(s) autoGifts=s end})
+TabAuto:CreateToggle({Name="Auto-Join",CurrentValue=false,Flag="AutoJoin",Callback=function(s) autoJoin=s if not s then lastJoinSignature=nil cachedJoinBtn=nil cachedJoinLabel=nil nextScanAt=0 end end})
+
+TabAuto:CreateSection("Farm")
+TabAuto:CreateToggle({Name="Auto-Farm (Key -> Door)",CurrentValue=false,Flag="AutoFarm",Callback=function(s) autoFarm=s end})
+
+local PRE_KEY_WAIT=1.0
+local PRE_DOOR_DELAY=1.0
+local DOOR_HOLD=4.0
+local POST_DOOR_DELAY=1.0
+
+local function spamNearbyPrompts(radius,pressTimes)
+    radius=radius or 12
+    pressTimes=pressTimes or 3
+    local r=hrp(); if not r then return end
+    local root=r.Position
+    local near={}
+    for _,d in ipairs(Workspace:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            local p=d.Parent
+            local bp=(p and p:IsA("BasePart")) and p or (p and p:FindFirstChildWhichIsA("BasePart",true))
+            if bp and (bp.Position-root).Magnitude<=radius then
+                table.insert(near,d)
+            end
+        end
+    end
+    for i=1,pressTimes do
+        for _,pp in ipairs(near) do pcall(function() firePrompt(pp,0.1) end) end
+        pressE(1,0)
+        task.wait(0.08)
+        if safetyEnabled and not safetyActive then
+            local r2=hrp(); if r2 and nearestMonsterDist(r2.Position)<10 then triggerSafety() return end
+        end
+    end
+end
+
+local function holdDoorPrompt(entry,seconds)
+    seconds=seconds or DOOR_HOLD
+    local pr=entry and entry.prompt
+    local part=entry and entry.part
+    if not (pr and part) then return end
+    local cf=part.CFrame+part.CFrame.LookVector*2
+    tp(cf)
+    task.wait(PRE_DOOR_DELAY)
+    if pr.Parent==nil then return end
+    if pr.HoldDuration and pr.HoldDuration>0 then
+        firePrompt(pr,seconds)
+    else
+        pressE(1,seconds)
+    end
+    task.wait(POST_DOOR_DELAY)
+end
+
+local farmState={busy=false}
+local function doAutoFarmStep()
+    if not autoFarm or farmState.busy or safetyActive then return end
+    farmState.busy=true
+    local r=hrp()
+    if r and safetyEnabled and nearestMonsterDist(r.Position)<10 then triggerSafety() farmState.busy=false return end
+    local key=nearestKey()
+    if key and key.part then
+        tp(key.part.CFrame+Vector3.new(0,3,0))
+        task.wait(PRE_KEY_WAIT)
+        spamNearbyPrompts(12,3)
+        pressE(5,0)
+    end
+    local door=anyDoor()
+    if door and door.part and door.prompt then
+        holdDoorPrompt(door,DOOR_HOLD)
+    end
+    farmState.busy=false
+    if autoFarm and not safetyActive then task.defer(doAutoFarmStep) end
+end
+
+local espTicker=0
+local autoTicker=0
+local pumpkinTicker=0
+local giftsTicker=0
+local joinTicker=0
+local safetyTicker=0
+
+RunService.Heartbeat:Connect(function(dt)
+    espTicker+=dt
+    autoTicker+=dt
+    pumpkinTicker+=dt
+    giftsTicker+=dt
+    joinTicker+=dt
+    safetyTicker+=dt
+
+    if espTicker>0.25 then
+        espTicker=0
+        if monsterESPEnabled then ensureMonsterTags() end
+        if keysESPEnabled then for node,_ in pairs(keyHooks) do if alive(node) and hasKeyPrompt(node) then enableKeyMark(node) end end else for _,part in pairs(keyEntries) do if part then clearChild(part,"KS_KeyBB") end end end
+        if doorsESPEnabled then for m,_ in pairs(doorHooks) do if alive(m) and isDoorModel(m) then tagDoor(m) end end else for m,p in pairs(doorParts) do if alive(m) then clearChild(m,"KS_DoorHL") end if p then clearChild(p,"KS_DoorBB") end end end
+    end
+
+    if safetyTicker>0.1 then
+        safetyTicker=0
+        if safetyEnabled and not safetyActive then
+            local r=hrp()
+            if r and nearestMonsterDist(r.Position)<10 then triggerSafety() end
+        end
+    end
+
+    if autoTicker>0.6 then
+        autoTicker=0
+        if autoFarm then doAutoFarmStep() end
+    end
+
+    if pumpkinTicker>0.8 then
+        pumpkinTicker=0
+        if autoPumpkins then collectPumpkinsOnce() end
+    end
+
+    if giftsTicker>1.2 then
+        giftsTicker=0
+        if autoGifts then collectGiftsOnce() end
+    end
+
+    if joinTicker>0.5 then
+        joinTicker=0
+        if autoJoin then clickJoinButton() end
+    end
+end)
+
+Rayfield:LoadConfiguration()
+StarterGui:SetCore("SendNotification",{Title="Keys Script",Text="Loaded",Duration=4})
