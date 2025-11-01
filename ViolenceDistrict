@@ -10,7 +10,6 @@ local StarterPlayer = game:GetService("StarterPlayer")
 local VirtualUser = game:GetService("VirtualUser")
 local LP = Players.LocalPlayer
 
--- ========= utils =========
 local function alive(i)
     if not i then return false end
     local ok = pcall(function() return i.Parent end)
@@ -112,7 +111,6 @@ local function clearHighlight(model)
     end
 end
 
--- ========= ui =========
 local Window   = Rayfield:CreateWindow({Name="Violence District",LoadingTitle="Violence District",LoadingSubtitle="by jlcfg",ConfigurationSaving={Enabled=true,FolderName="VD_Suite",FileName="vd_config"},KeySystem=false})
 local TabPlayer= Window:CreateTab("Player")
 local TabESP   = Window:CreateTab("ESP")
@@ -120,7 +118,6 @@ local TabWorld = Window:CreateTab("World")
 local TabVisual= Window:CreateTab("Visual")
 local TabMisc  = Window:CreateTab("Misc")
 
--- ========= roles / killer detection =========
 local function getRole(p)
     local tn = p.Team and p.Team.Name and p.Team.Name:lower() or ""
     if tn:find("killer") then return "Killer" end
@@ -178,7 +175,6 @@ local function setKillerType(name)
     end
 end
 
--- ========= player esp =========
 local survivorColor = Color3.fromRGB(0,255,0)
 local killerBaseColor = killerColors.Killer
 local nametagsEnabled, playerESPEnabled = false, false
@@ -243,17 +239,17 @@ for _,p in ipairs(Players:GetPlayers()) do if p~=LP then watchPlayer(p) end end
 Players.PlayerAdded:Connect(watchPlayer)
 Players.PlayerRemoving:Connect(unwatchPlayer)
 
--- ========= world esp =========
 local worldColors = {
     Generator = Color3.fromRGB(0,170,255),
     Hook = Color3.fromRGB(255,0,0),
     Gate = Color3.fromRGB(255,225,0),
     Window = Color3.fromRGB(255,255,255),
-    Palletwrong = Color3.fromRGB(255,140,0)
+    Palletwrong = Color3.fromRGB(255,140,0),
+    Pumpkin = Color3.fromRGB(255,165,0)
 }
-local worldEnabled = {Generator=false,Hook=false,Gate=false,Window=false,Palletwrong=false}
-local validCats = {Generator=true,Hook=true,Gate=true,Window=true,Palletwrong=true}
-local worldReg = {Generator={},Hook={},Gate={},Window={},Palletwrong={}}
+local worldEnabled = {Generator=false,Hook=false,Gate=false,Window=false,Palletwrong=false,Pumpkin=false}
+local validCats = {Generator=true,Hook=true,Gate=true,Window=true,Palletwrong=true,Pumpkin=true}
+local worldReg = {Generator={},Hook={},Gate={},Window={},Palletwrong={},Pumpkin={}}
 local mapAdd, mapRem = {}, {}
 
 local palletState = setmetatable({}, {__mode="k"})
@@ -280,6 +276,9 @@ local function pickRep(model, cat)
         local b = model:FindFirstChild("PrimaryPartPallet", true); if validPart(b) then return b end
         local c = model:FindFirstChild("Primary1", true); if validPart(c) then return c end
         local d = model:FindFirstChild("Primary2", true); if validPart(d) then return d end
+    elseif cat == "Pumpkin" then
+        local p = model:FindFirstChildWhichIsA("BasePart", true)
+        if validPart(p) then return p end
     end
     return firstBasePart(model)
 end
@@ -333,25 +332,58 @@ local function removeWorldEntry(cat, model)
     clearChild(e.part, "VD_Text_"..cat)
     worldReg[cat][model] = nil
 end
+
+local function isPumpkinModelName(n)
+    if not n then return false end
+    return string.find(n, "^Pumpkin%d*$") ~= nil
+end
+
 local function registerFromDescendant(obj)
     if not alive(obj) then return end
-    if obj:IsA("Model") and validCats[obj.Name] then
-        ensureWorldEntry(obj.Name, obj)
-        return
+    if obj:IsA("Model") then
+        if validCats[obj.Name] then
+            ensureWorldEntry(obj.Name, obj)
+            return
+        end
+        if isPumpkinModelName(obj.Name) then
+            ensureWorldEntry("Pumpkin", obj)
+            return
+        end
     end
-    if obj:IsA("BasePart") and obj.Parent and obj.Parent:IsA("Model") and validCats[obj.Parent.Name] then
-        ensureWorldEntry(obj.Parent.Name, obj.Parent)
+    if obj:IsA("BasePart") and obj.Parent and obj.Parent:IsA("Model") then
+        if validCats[obj.Parent.Name] then
+            ensureWorldEntry(obj.Parent.Name, obj.Parent)
+            return
+        end
+        if isPumpkinModelName(obj.Parent.Name) then
+            ensureWorldEntry("Pumpkin", obj.Parent)
+            return
+        end
     end
 end
 local function unregisterFromDescendant(obj)
     if not obj then return end
-    if obj:IsA("Model") and validCats[obj.Name] then
-        removeWorldEntry(obj.Name, obj)
-        return
+    if obj:IsA("Model") then
+        if validCats[obj.Name] then
+            removeWorldEntry(obj.Name, obj)
+            return
+        end
+        if isPumpkinModelName(obj.Name) then
+            removeWorldEntry("Pumpkin", obj)
+            return
+        end
     end
-    if obj:IsA("BasePart") and obj.Parent and obj.Parent:IsA("Model") and validCats[obj.Parent.Name] then
-        local e = worldReg[obj.Parent.Name][obj.Parent]
-        if e and e.part == obj then removeWorldEntry(obj.Parent.Name, obj.Parent) end
+    if obj:IsA("BasePart") and obj.Parent and obj.Parent:IsA("Model") then
+        if validCats[obj.Parent.Name] then
+            local e = worldReg[obj.Parent.Name][obj.Parent]
+            if e and e.part == obj then removeWorldEntry(obj.Parent.Name, obj.Parent) end
+            return
+        end
+        if isPumpkinModelName(obj.Parent.Name) then
+            local e = worldReg.Pumpkin[obj.Parent]
+            if e and e.part == obj then removeWorldEntry("Pumpkin", obj.Parent) end
+            return
+        end
     end
 end
 local function attachRoot(root)
@@ -405,6 +437,7 @@ local function startWorldLoop()
                                         if cat=="Generator" then local txt,lblCol=genLabelData(model) lbl.Text=txt lbl.TextColor3=lblCol
                                         elseif cat=="Palletwrong" then lbl.Text=labelForPallet(model) lbl.TextColor3=col
                                         elseif cat=="Window" then lbl.Text=labelForWindow(model) lbl.TextColor3=col
+                                        elseif cat=="Pumpkin" then lbl.Text="Pumpkin" lbl.TextColor3=col
                                         else lbl.Text=cat lbl.TextColor3=col end
                                     end
                                 end
@@ -441,14 +474,15 @@ TabWorld:CreateToggle({Name="Hooks",CurrentValue=false,Flag="Hook",Callback=func
 TabWorld:CreateToggle({Name="Gates",CurrentValue=false,Flag="Gate",Callback=function(s) setWorldToggle("Gate", s) end})
 TabWorld:CreateToggle({Name="Windows (Usability)",CurrentValue=false,Flag="Window",Callback=function(s) setWorldToggle("Window", s) end})
 TabWorld:CreateToggle({Name="Pallets (Usability)",CurrentValue=false,Flag="Pallet",Callback=function(s) setWorldToggle("Palletwrong", s) end})
+TabWorld:CreateToggle({Name="Pumpkins",CurrentValue=false,Flag="Pumpkin",Callback=function(s) setWorldToggle("Pumpkin", s) end})
 TabWorld:CreateSection("Colors")
 TabWorld:CreateColorPicker({Name="Generators",Color=worldColors.Generator,Flag="GenCol",Callback=function(c) worldColors.Generator=c end})
 TabWorld:CreateColorPicker({Name="Hooks",Color=worldColors.Hook,Flag="HookCol",Callback=function(c) worldColors.Hook=c end})
 TabWorld:CreateColorPicker({Name="Gates",Color=worldColors.Gate,Flag="GateCol",Callback=function(c) worldColors.Gate=c end})
 TabWorld:CreateColorPicker({Name="Windows",Color=worldColors.Window,Flag="WinCol",Callback=function(c) worldColors.Window=c end})
 TabWorld:CreateColorPicker({Name="Pallets",Color=worldColors.Palletwrong,Flag="PalCol",Callback=function(c) worldColors.Palletwrong=c end})
+TabWorld:CreateColorPicker({Name="Pumpkins",Color=worldColors.Pumpkin,Flag="PumpCol",Callback=function(c) worldColors.Pumpkin=c end})
 
--- ========= lighting =========
 local initLighting = {
     Brightness = Lighting.Brightness,
     ClockTime = Lighting.ClockTime,
@@ -501,7 +535,6 @@ TabVisual:CreateToggle({
 })
 TabVisual:CreateSlider({Name="Time Of Day",Range={0,24},Increment=1,CurrentValue=Lighting.ClockTime,Flag="TimeOfDay",Callback=function(v) desiredClockTime=v Lighting.ClockTime=v bindTimeLock() end})
 
--- ========= NoFog =========
 local nfActive=false
 local nfStore={lighting={},inst=setmetatable({},{__mode="k"}),conns={},tick=nil}
 local nfNameTokens={"smoke","mist","fog","haze","smog","steam","cloud","lake"}
@@ -619,7 +652,6 @@ local function nfDisable()
 end
 TabVisual:CreateToggle({Name="No Fog",CurrentValue=false,Flag="NoFog",Callback=function(s) if s then nfEnable() else nfDisable() end end})
 
--- ========= NoShadows =========
 local nsActive=false
 local nsStore={lighting={},parts=setmetatable({},{__mode="k"}),conns={}}
 local nsQueue, nsQueued, nsProcessed = {}, setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
@@ -698,7 +730,6 @@ local function nsDisable()
 end
 TabVisual:CreateToggle({Name="No Shadows",CurrentValue=false,Flag="NoShadows",Callback=function(s) if s then nsEnable() else nsDisable() end end})
 
--- ========= speed lock (stabilized) =========
 local speedCurrent, speedHumanoid = 16, nil
 local speedEnforced, speedPaused = false, false
 local speedStunUntil, speedSlowUntil = 0, 0
@@ -827,12 +858,10 @@ local function bindHumanoid(h)
     end
 end
 
--- ========= notifications =========
 local abilityNotifyEnabled = true
 TabMisc:CreateSection("Notifications")
 TabMisc:CreateToggle({Name="Killer Ability Notify",CurrentValue=true,Flag="AbilityNotify",Callback=function(s) abilityNotifyEnabled=s end})
 
--- ========= remote hooks: killer detect + ability notify =========
 local remoteHooks=setmetatable({},{__mode="k"})
 local abilityAllow = {
     ["Killer.ActivatePower"]      = "Ability Activated",
@@ -947,7 +976,6 @@ end
 for _,d in ipairs(ReplicatedStorage:GetDescendants()) do if d:IsA("RemoteEvent") or d:IsA("BindableEvent") then connectRemote(d) end end
 ReplicatedStorage.DescendantAdded:Connect(function(d) if d:IsA("RemoteEvent") or d:IsA("BindableEvent") then connectRemote(d) end end)
 
--- ========= hook humanoid (install) =========
 local function onCharacterAdded(char)
     local h = char:WaitForChild("Humanoid", 10) or char:FindFirstChildOfClass("Humanoid")
     if h then bindHumanoid(h) end
@@ -956,7 +984,6 @@ end
 if LP.Character then onCharacterAdded(LP.Character) end
 LP.CharacterAdded:Connect(onCharacterAdded)
 
--- ========= player tab controls =========
 TabPlayer:CreateSection("Movement")
 TabPlayer:CreateToggle({
     Name="Speed Lock",
@@ -983,7 +1010,6 @@ TabPlayer:CreateToggle({
 TabPlayer:CreateSlider({Name="Walk Speed",Range={0,200},Increment=1,CurrentValue=16,Flag="WalkSpeed",Callback=function(v) speedCurrent=v if speedEnforced and canEnforce() then setWalkSpeed(speedHumanoid,speedCurrent) end end})
 TabPlayer:CreateButton({Name="Reset Speed",Callback=function() speedCurrent=canonicalDefault() if speedHumanoid and speedHumanoid.Parent then if speedEnforced and canEnforce() then setWalkSpeed(speedHumanoid,speedCurrent) else applyDisabledState() end end end})
 
--- ========= noclip =========
 local noclipEnabled, noclipConn, noclipTouched = false, nil, {}
 local function setNoclip(state)
     if state and not noclipConn then
@@ -1008,7 +1034,6 @@ end
 TabPlayer:CreateToggle({Name="Noclip",CurrentValue=false,Flag="Noclip",Callback=function(s) setNoclip(s) end})
 LP.CharacterAdded:Connect(function() if noclipEnabled then task.wait(0.2) setNoclip(true) end end)
 
--- ========= teleports =========
 TabPlayer:CreateSection("Teleports")
 local function tpCFrame(cf)
     local char=LP.Character
@@ -1040,7 +1065,6 @@ end
 TabPlayer:CreateButton({Name="Teleport to Killer (Nearest)",Callback=function() teleportToNearest("Killer") end})
 TabPlayer:CreateButton({Name="Teleport to Teammate (Nearest)",Callback=function() teleportToNearest("Survivor") end})
 
--- ========= anti afk =========
 TabPlayer:CreateSection("AFK")
 local antiAFKConn=nil
 local function setAntiAFK(state)
@@ -1055,7 +1079,6 @@ local function setAntiAFK(state)
 end
 TabPlayer:CreateToggle({Name="Anti AFK",CurrentValue=false,Flag="AntiAFK",Callback=function(s) setAntiAFK(s) end})
 
--- ========= skillcheck remover =========
 local function isKillerTeam() local tn=LP.Team and LP.Team.Name and LP.Team.Name:lower() or "" return tn:find("killer",1,true)~=nil end
 local guiWhitelist = {Rayfield=true,DevConsoleMaster=true,RobloxGui=true,PlayerList=true,Chat=true,BubbleChat=true,Backpack=true}
 local skillExactNames = {SkillCheckPromptGui=true,["SkillCheckPromptGui-con"]=true,SkillCheckEvent=true,SkillCheckFailEvent=true,SkillCheckResultEvent=true}
@@ -1156,7 +1179,6 @@ LP:GetPropertyChangedSignal("Team"):Connect(evalNoSkill)
 TabMisc:CreateSection("Skillcheck")
 TabMisc:CreateToggle({Name="No Skillchecks",CurrentValue=false,Flag="NoSkill",Callback=function(s) noSkillToggleUser=s evalNoSkill() end})
 
--- ========= escape =========
 local function findExitLevers()
     local list={}
     local map=Workspace:FindFirstChild("Map")
@@ -1188,16 +1210,15 @@ TabWorld:CreateButton({Name="Instant-Escape (Nearest Gate)",Callback=function()
     Rayfield:Notify({Title="Instant-Escape",Content="Teleported behind gate.",Duration=4})
 end})
 
--- ========= AUTO REPAIR GENS (hardcoded Scanner + TP & Killer Avoid) =========
 do
     local autoRepairEnabled = false
-    local SCAN_INTERVAL = 1.0          -- hart verdrahtet: interner Scan
-    local REPAIR_TICK   = 0.25         -- wie oft Repair-Call / Retarget prüft
-    local AVOID_RADIUS  = 80           -- Killer-Abstand (Studs), bei < wechsle Gen
-    local MOVE_DIST     = 35           -- ab dieser Distanz wird teleportiert
-    local UP_OFFSET     = Vector3.new(0, 3, 0) -- leichte Höhe beim TP
-    local gens = {}                    -- { {model=Model, part=BasePart}, ... }
-    local current = nil                -- aktuelles Ziel {model,part}
+    local SCAN_INTERVAL = 1.0
+    local REPAIR_TICK   = 0.25
+    local AVOID_RADIUS  = 80
+    local MOVE_DIST     = 35
+    local UP_OFFSET     = Vector3.new(0, 3, 0)
+    local gens = {}
+    local current = nil
     local lastScan = 0
 
     local function findRemotes()
@@ -1214,15 +1235,6 @@ do
     local function ensureRemotes()
         if RepairEvent and RepairEvent.Parent then return end
         RepairEvent, RepairAnim = findRemotes()
-    end
-
-    local function modelOfGenerator(node)
-        local m = node
-        while m and m.Parent do
-            if m:IsA("Model") and m.Name=="Generator" then return m end
-            m = m.Parent
-        end
-        return nil
     end
 
     local function getGenPartFromModel(m)
@@ -1288,7 +1300,6 @@ do
                 if prog < 100 and not genPaused(m) then
                     local pos = g.part.Position
                     local kd = nearestKillerDistanceTo(pos)
-                    -- Score: priorisiere Sicherheit zuerst, dann Fortschritt
                     local score = (kd >= AVOID_RADIUS and 1000 or 0) + prog
                     if score > bestScore then
                         bestScore = score
@@ -1322,7 +1333,6 @@ do
         if RepairEvent and RepairEvent.FireServer then pcall(function() RepairEvent:FireServer(target.model) end) end
     end
 
-    -- interner Scanner (hardcoded, immer an)
     task.spawn(function()
         while true do
             local t = now()
@@ -1334,29 +1344,24 @@ do
         end
     end)
 
-    -- Hauptloop (nur aktiv, wenn Toggle an)
     task.spawn(function()
         while true do
             if autoRepairEnabled then
-                -- wähle/prüfe Ziel
                 if (not current) or (not alive(current.model)) or genProgress(current.model) >= 100 or genPaused(current.model) or (not safeFromKiller(current)) then
                     current = chooseTarget()
                 end
 
                 if current and alive(current.model) and genProgress(current.model) < 100 then
-                    -- Killer nahe am Spieler? -> eventuell sofort retargeten/TP
                     local me = lpHRP()
                     if me and nearestKillerDistanceTo(me.Position) < AVOID_RADIUS then
                         local alt = chooseTarget()
                         if alt and alt ~= current then current = alt end
                     end
 
-                    -- Teleport falls nötig
                     if not closeEnough(current) then
                         tpNear(current.part)
                     end
 
-                    -- Repair feuern
                     doRepair(current)
                 end
             end
@@ -1364,7 +1369,6 @@ do
         end
     end)
 
-    -- Ein einziger Toggle in World-Tab
     TabWorld:CreateToggle({
         Name="Auto-Repair Gens",
         CurrentValue=false,
@@ -1379,13 +1383,11 @@ do
         end
     })
 
-    -- Remotes können nach Map-Wechsel neu geladen werden
     ReplicatedStorage.DescendantAdded:Connect(function(d)
         if d:IsA("RemoteEvent") and d.Name=="RepairEvent" then RepairEvent=d end
         if d:IsA("RemoteEvent") and d.Name=="RepairAnim"  then RepairAnim=d end
     end)
 end
--- ========= finalize =========
 Rayfield:LoadConfiguration()
 Rayfield:Notify({Title="Violence District",Content="Loaded",Duration=6})
-Rayfield:Notify({Title="Info",Content="Pallet ghost ESP fixed • Speed Lock stabilized",Duration=6})
+Rayfield:Notify({Title="Info",Content="Pallet ghost ESP fixed • Speed Lock stabilized • Pumpkin ESP added",Duration=6})
