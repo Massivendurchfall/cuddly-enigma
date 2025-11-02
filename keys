@@ -245,48 +245,63 @@ local function ensureMonsterTags()
     end
 end
 
-local keyHooks={}
-local keyEntries=setmetatable({},{__mode="k"})
-local function isKeyNode(n) return n and (n.Name=="Point_1" or n.Name=="SpawnPoint_1") end
-local function hasKeyPrompt(n)
-    if not alive(n) then return false end
-    if n:FindFirstChild("InteractPrompt",true) then return true end
-    if n:FindFirstChildWhichIsA("ProximityPrompt",true) then return true end
-    return false
-end
-local function partForKeyNode(node)
-    local p=node:FindFirstChildWhichIsA("BasePart",true); if p then return p end
-    if node.Parent then
-        local s=node.Parent:FindFirstChildWhichIsA("BasePart",true); if s then return s end
+local function isSpawnPointName(n) return typeof(n)=="string" and n:match("^SpawnPoint_%d+$")~=nil end
+local function isPointName(n) return typeof(n)=="string" and n:match("^Point_%d+$")~=nil end
+
+local keyPromptToPart=setmetatable({},{__mode="k"})
+local function nearestBasePartFrom(inst)
+    local p=inst
+    while p and not p:IsA("BasePart") do p=p.Parent end
+    if p and p:IsA("BasePart") then return p end
+    p=inst.Parent
+    if p then
+        local b=p:FindFirstChildWhichIsA("BasePart",true)
+        if b then return b end
     end
     return nil
 end
-local function enableKeyMark(node)
-    if not keysESPEnabled then return end
-    local part=partForKeyNode(node); if not part then return end
+
+local function isDrawerPrompt(pr)
+    if not pr then return false end
+    local sp=pr.Parent
+    if not (sp and isSpawnPointName(sp.Name)) then return false end
+    local dc=sp.Parent
+    return dc and dc.Name=="DrawerContainer"
+end
+
+local function isItemSpawnPrompt(pr)
+    if not pr then return false end
+    local point=pr.Parent
+    if not (point and isPointName(point.Name)) then return false end
+    local sp=point.Parent
+    if not (sp and isSpawnPointName(sp.Name)) then return false end
+    return sp.Parent and sp.Parent.Name=="ItemSpawn"
+end
+
+local function isValidKeyPrompt(pr)
+    if not alive(pr) then return false end
+    if not (pr:IsA("ProximityPrompt") or pr.Name=="InteractPrompt") then return false end
+    local ih=nil
+    local n=pr
+    while n and n~=Workspace do
+        if n.Name=="ItemHuntFolder" then ih=n break end
+        n=n.Parent
+    end
+    if not ih then return false end
+    return isItemSpawnPrompt(pr) or isDrawerPrompt(pr)
+end
+
+local function showKeyLabelFor(pr)
+    if not keysESPEnabled or not isValidKeyPrompt(pr) then return end
+    local part=nearestBasePartFrom(pr); if not part then return end
     ensureBillboard(part,"KS_KeyBB","Key",Color3.fromRGB(0,170,255))
-    keyEntries[node]=part
+    keyPromptToPart[pr]=part
 end
-local function disableKeyMark(node)
-    local part=keyEntries[node] or partForKeyNode(node)
+
+local function clearKeyLabelFor(pr)
+    local part=keyPromptToPart[pr] or nearestBasePartFrom(pr)
     if part then clearChild(part,"KS_KeyBB") end
-    keyEntries[node]=nil
-end
-local function hookKeyNode(node)
-    if keyHooks[node] then return end
-    local a=node.DescendantAdded:Connect(function(ch)
-        if ch.Name=="InteractPrompt" or ch:IsA("ProximityPrompt") then if keysESPEnabled then enableKeyMark(node) end end
-    end)
-    local b=node.DescendantRemoving:Connect(function(ch)
-        if ch.Name=="InteractPrompt" or ch:IsA("ProximityPrompt") then disableKeyMark(node) end
-    end)
-    keyHooks[node]={a,b}
-    if hasKeyPrompt(node) and keysESPEnabled then enableKeyMark(node) end
-end
-local function unhookKeyNode(node)
-    local cs=keyHooks[node]
-    if cs then for _,c in ipairs(cs) do pcall(function() c:Disconnect() end) end keyHooks[node]=nil end
-    disableKeyMark(node)
+    keyPromptToPart[pr]=nil
 end
 
 local doorHooks={}
@@ -317,43 +332,51 @@ local function hookDoor(m)
     doorHooks[m]=a
 end
 
-local function attachFromIH(ih)
-    if not ih or not ih:IsA("Folder") then return end
-    local isf=ih:FindFirstChild("ItemSpawn")
-    if isf then
-        for _,sp in ipairs(isf:GetChildren()) do
-            local p1=sp:FindFirstChild("Point_1"); if p1 then hookKeyNode(p1) end
-        end
-    end
-    for _,dc in ipairs(ih:GetDescendants()) do
-        if dc.Name=="DrawerContainer" then
-            for _,d in ipairs(dc:GetDescendants()) do
-                if d.Name=="SpawnPoint_1" or d.Name=="Point_1" then hookKeyNode(d) end
+local function attachMap(map)
+    local ih=map:FindFirstChild("ItemHuntFolder")
+    if ih then
+        local isf=ih:FindFirstChild("ItemSpawn",true)
+        if isf then
+            for _,sp in ipairs(isf:GetChildren()) do
+                if isSpawnPointName(sp.Name) then
+                    for _,pt in ipairs(sp:GetChildren()) do
+                        if isPointName(pt.Name) then
+                            local ip=pt:FindFirstChild("InteractPrompt",true) or pt:FindFirstChildWhichIsA("ProximityPrompt",true)
+                            if ip then showKeyLabelFor(ip) end
+                        end
+                    end
+                end
             end
         end
-    end
-    local ip=ih:FindFirstChild("ItemPlace")
-    if ip then
-        for _,d in ipairs(ip:GetChildren()) do if isDoorModel(d) then hookDoor(d) end end
+        for _,dc in ipairs(ih:GetDescendants()) do
+            if dc.Name=="DrawerContainer" then
+                for _,sp in ipairs(dc:GetChildren()) do
+                    if isSpawnPointName(sp.Name) then
+                        local ip=sp:FindFirstChild("InteractPrompt",true) or sp:FindFirstChildWhichIsA("ProximityPrompt",true)
+                        if ip then showKeyLabelFor(ip) end
+                    end
+                end
+            end
+        end
+        local ip=ih:FindFirstChild("ItemPlace")
+        if ip then
+            for _,d in ipairs(ip:GetChildren()) do if isDoorModel(d) then hookDoor(d) end end
+        end
     end
 end
 
 local maps=Workspace:FindFirstChild("Maps")
 if maps then
-    for _,d in ipairs(maps:GetDescendants()) do if d.Name=="ItemHuntFolder" then attachFromIH(d) end end
+    for _,map in ipairs(maps:GetChildren()) do attachMap(map) end
     maps.DescendantAdded:Connect(function(d)
         if not alive(d) then return end
-        if d.Name=="ItemHuntFolder" then attachFromIH(d) end
-        if d.Name=="ItemSpawn" and d.Parent and d.Parent.Name=="ItemHuntFolder" then
-            for _,sp in ipairs(d:GetChildren()) do local p1=sp:FindFirstChild("Point_1"); if p1 then hookKeyNode(p1) end end
-        end
-        if d.Name=="DrawerContainer" then
-            for _,x in ipairs(d:GetDescendants()) do if x.Name=="SpawnPoint_1" or x.Name=="Point_1" then hookKeyNode(x) end end
+        if d:IsA("ProximityPrompt") or d.Name=="InteractPrompt" then
+            if isValidKeyPrompt(d) then showKeyLabelFor(d) end
         end
         if isDoorModel(d) then hookDoor(d) end
     end)
     maps.DescendantRemoving:Connect(function(d)
-        if isKeyNode(d) then unhookKeyNode(d) end
+        if d:IsA("ProximityPrompt") or d.Name=="InteractPrompt" then clearKeyLabelFor(d) end
         if isDoorModel(d) then
             if doorHooks[d] then pcall(function() doorHooks[d]:Disconnect() end) doorHooks[d]=nil end
             clearChild(d,"KS_DoorHL")
@@ -364,33 +387,30 @@ if maps then
 end
 
 local function availableKeys()
-    local result={}
-    for node,_ in pairs(keyHooks) do
-        if alive(node) and hasKeyPrompt(node) then
-            local p=partForKeyNode(node)
-            if p then
-                table.insert(result,{node=node,part=p})
-            end
+    local res={}
+    for pr,_ in pairs(keyPromptToPart) do
+        if alive(pr) and isValidKeyPrompt(pr) then
+            local part=keyPromptToPart[pr]
+            if part and alive(part) then table.insert(res,{prompt=pr,part=part}) end
         end
     end
-    return result
+    return res
 end
 
 local function availableDoors()
     local res={}
     if not maps then return res end
-    for _,ih in ipairs(maps:GetDescendants()) do
-        if ih.Name=="ItemHuntFolder" then
-            local ip=ih:FindFirstChild("ItemPlace")
-            if ip then
-                for _,m in ipairs(ip:GetChildren()) do
-                    if isDoorModel(m) then
-                        local pr=doorPrompt(m)
-                        local cp=m:FindFirstChild("ControlPart")
-                        local pp=cp and cp:IsA("BasePart") and cp or doorMainPart(m)
-                        if pr and cp and pp then
-                            table.insert(res,{model=m,prompt=pr,part=pp})
-                        end
+    for _,map in ipairs(maps:GetChildren()) do
+        local ih=map:FindFirstChild("ItemHuntFolder")
+        local ip=ih and ih:FindFirstChild("ItemPlace")
+        if ip then
+            for _,m in ipairs(ip:GetChildren()) do
+                if isDoorModel(m) then
+                    local pr=doorPrompt(m)
+                    local cp=m:FindFirstChild("ControlPart")
+                    local pp=cp and cp:IsA("BasePart") and cp or doorMainPart(m)
+                    if pr and cp and pp then
+                        table.insert(res,{model=m,prompt=pr,part=pp})
                     end
                 end
             end
@@ -425,22 +445,13 @@ local function pressE(times,holdSeconds)
         vim:SendKeyEvent(false,Enum.KeyCode.E,false,game)
         task.wait(0.05)
         if safetyEnabled and not safetyActive then
-            local r=hrp(); if r and nearestMonsterDist(r.Position)<10 then triggerSafety() return end
+            local r=hrp(); if r and nearestMonsterDist(r.Position)<10 then return end
         end
     end
     if holdSeconds and holdSeconds>0 then
         vim:SendKeyEvent(true,Enum.KeyCode.E,false,game)
         local t0=os.clock()
         while os.clock()-t0<holdSeconds do
-            if safetyEnabled and not safetyActive then
-                local r=hrp()
-                if r and nearestMonsterDist(r.Position)<10 then
-                    vim:SendKeyEvent(false,Enum.KeyCode.E,false,game)
-                    triggerSafety()
-                    while safetyActive do task.wait(0.1) end
-                    vim:SendKeyEvent(true,Enum.KeyCode.E,false,game)
-                end
-            end
             task.wait(0.05)
         end
         vim:SendKeyEvent(false,Enum.KeyCode.E,false,game)
@@ -559,7 +570,7 @@ local function clickJoinButton()
             local sig=tostring(cachedJoinBtn:GetDebugId())..":"..tostring(cachedJoinBtn.AbsolutePosition)..":"..tostring(cachedJoinBtn.AbsoluteSize)
             if sig~=lastJoinSignature then
                 lastJoinSignature=sig
-                task.defer(robustClick,cachedJoinBtn)
+                robustClick(cachedJoinBtn)
             end
         end
         return
@@ -571,7 +582,7 @@ local function clickJoinButton()
         local sig=tostring(cachedJoinBtn:GetDebugId())..":"..tostring(cachedJoinBtn.AbsolutePosition)..":"..tostring(cachedJoinBtn.AbsoluteSize)
         if sig~=lastJoinSignature then
             lastJoinSignature=sig
-            task.defer(robustClick,cachedJoinBtn)
+            robustClick(cachedJoinBtn)
         end
     end
 end
@@ -596,11 +607,10 @@ TabESP:CreateSection("Keys")
 TabESP:CreateToggle({Name="Keys ESP",CurrentValue=false,Flag="ESP_Keys",Callback=function(s)
     keysESPEnabled=s
     if not s then
-        for node,_ in pairs(keyEntries) do disableKeyMark(node) end
-        keyEntries=setmetatable({},{__mode="k"})
+        for pr,part in pairs(keyPromptToPart) do if part then clearChild(part,"KS_KeyBB") end end
         clearAllByName("KS_KeyBB")
     else
-        for node,_ in pairs(keyHooks) do if hasKeyPrompt(node) then enableKeyMark(node) end end
+        for pr,_ in pairs(keyPromptToPart) do if alive(pr) and isValidKeyPrompt(pr) then showKeyLabelFor(pr) end end
     end
 end})
 
@@ -608,10 +618,7 @@ TabESP:CreateSection("Doors")
 TabESP:CreateToggle({Name="Door ESP",CurrentValue=false,Flag="ESP_Doors",Callback=function(s)
     doorsESPEnabled=s
     for m,_ in pairs(doorHooks) do if alive(m) and isDoorModel(m) then tagDoor(m) end end
-    if not s then
-        for m,p in pairs(doorParts) do if alive(m) then clearChild(m,"KS_DoorHL") end if p then clearChild(p,"KS_DoorBB") end end
-        clearAllByName("KS_DoorBB")
-    end
+    if not s then for m,p in pairs(doorParts) do if alive(m) then clearChild(m,"KS_DoorHL") end if p then clearChild(p,"KS_DoorBB") end end clearAllByName("KS_DoorBB") end
 end})
 
 TabAuto:CreateSection("Events")
@@ -622,9 +629,7 @@ TabAuto:CreateToggle({Name="Auto-Join",CurrentValue=false,Flag="AutoJoin",Callba
 TabAuto:CreateSection("Farm")
 TabAuto:CreateToggle({Name="Auto-Farm (Key -> Door)",CurrentValue=false,Flag="AutoFarm",Callback=function(s) autoFarm=s end})
 
-local PRE_KEY_WAIT=1.0
 local PRE_DOOR_DELAY=1.0
-local DOOR_HOLD=4.0
 local POST_DOOR_DELAY=1.0
 
 local function spamNearbyPrompts(radius,pressTimes)
@@ -646,14 +651,11 @@ local function spamNearbyPrompts(radius,pressTimes)
         for _,pp in ipairs(near) do pcall(function() firePrompt(pp,0.1) end) end
         pressE(1,0)
         task.wait(0.08)
-        if safetyEnabled and not safetyActive then
-            local r2=hrp(); if r2 and nearestMonsterDist(r2.Position)<10 then triggerSafety() return end
-        end
     end
 end
 
 local function holdDoorPrompt(entry,seconds)
-    seconds=seconds or DOOR_HOLD
+    seconds=seconds or 4
     local pr=entry and entry.prompt
     local part=entry and entry.part
     if not (pr and part) then return end
@@ -673,18 +675,16 @@ local farmState={busy=false}
 local function doAutoFarmStep()
     if not autoFarm or farmState.busy or safetyActive then return end
     farmState.busy=true
-    local r=hrp()
-    if r and safetyEnabled and nearestMonsterDist(r.Position)<10 then triggerSafety() farmState.busy=false return end
     local key=nearestKey()
     if key and key.part then
         tp(key.part.CFrame+Vector3.new(0,3,0))
-        task.wait(PRE_KEY_WAIT)
+        task.wait(1.0)
         spamNearbyPrompts(12,3)
         pressE(5,0)
     end
     local door=anyDoor()
     if door and door.part and door.prompt then
-        holdDoorPrompt(door,DOOR_HOLD)
+        holdDoorPrompt(door,4)
     end
     farmState.busy=false
     if autoFarm and not safetyActive then task.defer(doAutoFarmStep) end
@@ -708,7 +708,11 @@ RunService.Heartbeat:Connect(function(dt)
     if espTicker>0.25 then
         espTicker=0
         if monsterESPEnabled then ensureMonsterTags() end
-        if keysESPEnabled then for node,_ in pairs(keyHooks) do if alive(node) and hasKeyPrompt(node) then enableKeyMark(node) end end else for _,part in pairs(keyEntries) do if part then clearChild(part,"KS_KeyBB") end end end
+        if keysESPEnabled then
+            for pr,part in pairs(keyPromptToPart) do if alive(pr) and isValidKeyPrompt(pr) then showKeyLabelFor(pr) end end
+        else
+            for _,part in pairs(keyPromptToPart) do if part then clearChild(part,"KS_KeyBB") end end
+        end
         if doorsESPEnabled then for m,_ in pairs(doorHooks) do if alive(m) and isDoorModel(m) then tagDoor(m) end end else for m,p in pairs(doorParts) do if alive(m) then clearChild(m,"KS_DoorHL") end if p then clearChild(p,"KS_DoorBB") end end end
     end
 
