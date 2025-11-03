@@ -6,6 +6,7 @@ local StarterGui=game:GetService("StarterGui")
 local VirtualUser=game:GetService("VirtualUser")
 local GuiService=game:GetService("GuiService")
 local VirtualInputManager=game:GetService("VirtualInputManager")
+local ProximityPromptService=game:GetService("ProximityPromptService")
 
 local LP=Players.LocalPlayer
 local Rayfield=loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
@@ -228,7 +229,8 @@ local keysESPEnabled=false
 local doorsESPEnabled=false
 local autoPumpkins=false
 local autoGifts=false
-local autoJoin=false
+local autoJoinGUI=false
+local autoJoinTouch=true
 local autoFarm=false
 
 local trackedPlayers={}
@@ -541,7 +543,7 @@ local function scoreButton(btn)
     return score
 end
 local function joinHeaderVisible()
-    local pg=Players.LocalPlayer:FindFirstChild("PlayerGui"); if not pg then return false end
+    local pg=Players.LocalPlayer:FindChild("PlayerGui") or Players.LocalPlayer:FindFirstChild("PlayerGui"); if not pg then return false end
     if cachedJoinLabel and cachedJoinLabel.Parent and visibleDeep(cachedJoinLabel) then return true end
     local best=nil
     for _,d in ipairs(pg:GetDescendants()) do
@@ -591,7 +593,7 @@ local function buttonIsTopMostAtCenter(btn)
     return false
 end
 local function clickJoinButton()
-    if not autoJoin then return end
+    if not autoJoinGUI then return end
     local t=time()
     if t<joinDebounceUntil then return end
     if t<nextScanAt then
@@ -663,13 +665,14 @@ end})
 TabAuto:CreateSection("Events")
 TabAuto:CreateToggle({Name="Auto-Collect Pumpkins",CurrentValue=false,Flag="AutoPumpkins",Callback=function(s) autoPumpkins=s end})
 TabAuto:CreateToggle({Name="Auto-Collect GiftBoxes",CurrentValue=false,Flag="AutoGifts",Callback=function(s) autoGifts=s end})
-TabAuto:CreateToggle({Name="Auto-Join",CurrentValue=false,Flag="AutoJoin",Callback=function(s) autoJoin=s if not s then lastJoinSignature=nil cachedJoinBtn=nil cachedJoinLabel=nil nextScanAt=0 joinDebounceUntil=0 end end})
+TabAuto:CreateToggle({Name="Auto-Join (GUI)",CurrentValue=false,Flag="AutoJoinGUI",Callback=function(s) autoJoinGUI=s if not s then lastJoinSignature=nil cachedJoinBtn=nil cachedJoinLabel=nil nextScanAt=0 joinDebounceUntil=0 end end})
+TabAuto:CreateToggle({Name="Auto-Join (Touch 100)",CurrentValue=true,Flag="AutoJoinTouch",Callback=function(s) autoJoinTouch=s end})
 
 TabAuto:CreateSection("Farm")
 TabAuto:CreateToggle({Name="Auto-Farm (Key -> Door)",CurrentValue=false,Flag="AutoFarm",Callback=function(s) autoFarm=s end})
 
-local PRE_DOOR_DELAY=1.2
-local POST_DOOR_DELAY=0.6
+local PRE_DOOR_DELAY=0.8
+local POST_DOOR_DELAY=0.45
 
 local function spamNearbyPrompts(radius,pressTimes)
     radius=radius or 14
@@ -688,8 +691,20 @@ local function spamNearbyPrompts(radius,pressTimes)
     end
 end
 
-local function holdDoorPrompt(entry,seconds)
-    seconds=seconds or 1.2
+local function getPromptHoldSeconds(pr)
+    local h=0
+    pcall(function() h=pr.HoldDuration or 0 end)
+    local a=0
+    if pr and pr.GetAttribute then
+        local v=pr:GetAttribute("UnlockTime")
+        if typeof(v)=="number" then a=v end
+    end
+    if a>h then h=a end
+    if h<=0 then h=0.2 end
+    return h+0.15
+end
+
+local function holdDoorPrompt(entry)
     local pr=entry and entry.prompt
     local part=entry and entry.part
     if not (pr and part) then return end
@@ -697,10 +712,11 @@ local function holdDoorPrompt(entry,seconds)
     tp(cf)
     task.wait(PRE_DOOR_DELAY)
     if pr.Parent==nil then return end
-    if pr.HoldDuration and pr.HoldDuration>0 then
-        firePrompt(pr,seconds)
+    local holdSecs=getPromptHoldSeconds(pr)
+    if (pr.HoldDuration and pr.HoldDuration>0) or (pr.GetAttribute and pr:GetAttribute("UnlockTime")) then
+        firePrompt(pr,holdSecs)
     else
-        pressE(1,seconds)
+        pressE(1,holdSecs)
     end
     task.wait(POST_DOOR_DELAY)
 end
@@ -712,28 +728,18 @@ local function doAutoFarmStep()
     local key=nearestKey()
     if key and key.part then
         tp(key.part.CFrame+Vector3.new(0,3,0))
-        task.wait(1.2)
+        task.wait(1.0)
         spamNearbyPrompts(14,5)
         pressE(6,0)
-        task.wait(0.25)
+        task.wait(0.2)
     end
     local door=anyDoor()
     if door and door.part and door.prompt then
-        holdDoorPrompt(door,1.2)
+        holdDoorPrompt(door)
     end
     farmState.busy=false
     if autoFarm and not safetyActive then task.defer(doAutoFarmStep) end
 end
-
-local espUpdateTick=0
-local monsterUpdateTick=0
-local autoTicker=0
-local pumpkinTicker=0
-local giftsTicker=0
-local joinTicker=0
-local safetyTicker=0
-local instantOpenTick=0
-local instantOpenDebounce={}
 
 local function isDoorPromptInstance(p)
     if not p then return false end
@@ -745,19 +751,127 @@ local function isDoorPromptInstance(p)
     return false
 end
 
+local joinTouchParts={}
+local joinTouchRoots={}
+local function addJoinRoot(root)
+    if root and alive(root) then table.insert(joinTouchRoots,root) end
+end
+local function findTouchOn(part)
+    if not part or not part:IsA("BasePart") then return nil end
+    local tt=part:FindFirstChildOfClass("TouchTransmitter")
+    if tt then return tt end
+    for _,c in ipairs(part:GetChildren()) do
+        if string.lower(c.Name)=="touchinterest" then return c end
+    end
+    return nil
+end
+local function scanJoinTouchParts()
+    joinTouchParts={}
+    joinTouchRoots={}
+    local lobby=Workspace:FindFirstChild("Lobby")
+    if lobby then
+        if lobby:FindFirstChild("LobbyRoom") and lobby.LobbyRoom:FindFirstChild("Interaction") then addJoinRoot(lobby.LobbyRoom.Interaction) end
+        if lobby:FindFirstChild("Interaction") then addJoinRoot(lobby.Interaction) end
+        if lobby:FindFirstChild("Interaction") and lobby.Interaction:FindFirstChild("GameDoor") then addJoinRoot(lobby.Interaction.GameDoor) end
+        if lobby:FindFirstChild("LobbyRoom") and lobby.LobbyRoom:FindFirstChild("Interaction") and lobby.LobbyRoom.Interaction:FindChild("GameDoor") or (lobby:FindFirstChild("LobbyRoom") and lobby.LobbyRoom:FindFirstChild("Interaction") and lobby.LobbyRoom.Interaction:FindFirstChild("GameDoor")) then
+            addJoinRoot(lobby.LobbyRoom.Interaction.GameDoor)
+        end
+    end
+    local exact=Workspace:FindFirstChild("Lobby")
+    if exact and exact:FindFirstChild("LobbyRoom") and exact.LobbyRoom:FindFirstChild("Interaction") and exact.LobbyRoom.Interaction:FindFirstChild("TouchPart") then
+        local tpPart=exact.LobbyRoom.Interaction.TouchPart
+        local ti=findTouchOn(tpPart)
+        if ti then table.insert(joinTouchParts,{part=tpPart,ti=ti}) end
+    end
+    for _,root in ipairs(joinTouchRoots) do
+        for _,d in ipairs(root:GetDescendants()) do
+            if d:IsA("BasePart") and string.lower(d.Name)=="touchpart" then
+                local ti=findTouchOn(d)
+                if ti then table.insert(joinTouchParts,{part=d,ti=ti}) end
+            end
+        end
+    end
+    if #joinTouchParts==0 then
+        for _,d in ipairs(Workspace:GetDescendants()) do
+            if d:IsA("BasePart") and string.lower(d.Name)=="touchpart" then
+                local n=d
+                local ok=false
+                while n and n~=Workspace do
+                    local nm=string.lower(n.Name)
+                    if nm:find("gamedoor") or nm:find("interaction") then ok=true break end
+                    n=n.Parent
+                end
+                if ok then
+                    local ti=findTouchOn(d)
+                    if ti then table.insert(joinTouchParts,{part=d,ti=ti}) end
+                end
+            end
+        end
+    end
+end
+scanJoinTouchParts()
+Workspace.DescendantAdded:Connect(function(d)
+    if not alive(d) then return end
+    if d:IsA("BasePart") and string.lower(d.Name)=="touchpart" then
+        local ti=findTouchOn(d)
+        if ti then table.insert(joinTouchParts,{part=d,ti=ti}) end
+    end
+end)
+Workspace.DescendantRemoving:Connect(function(d)
+    for i=#joinTouchParts,1,-1 do
+        local e=joinTouchParts[i]
+        if not alive(e.part) or e.part==d or e.ti==d then table.remove(joinTouchParts,i) end
+    end
+end)
+
+local function nearestJoinTouchPart(maxDist)
+    local r=hrp(); if not r then return nil end
+    local rp=r.Position
+    local best,bestd=nil,math.huge
+    for _,e in ipairs(joinTouchParts) do
+        if alive(e.part) then
+            local d=(e.part.Position-rp).Magnitude
+            if d<bestd then bestd=d best=e end
+        end
+    end
+    if best and bestd<=maxDist then return best,bestd end
+    return nil
+end
+
+local function tpIntoPart(part)
+    local r=hrp(); if not r then return end
+    local cf=part.CFrame+Vector3.new(0,2,0)
+    r.CFrame=cf
+    task.wait(0.05)
+    tryTouch(part)
+end
+
+local espUpdateTick=0
+local monsterUpdateTick=0
+local autoTicker=0
+local pumpkinTicker=0
+local giftsTicker=0
+local joinGuiTicker=0
+local safetyTicker=0
+local instantOpenTick=0
+local instantOpenDebounce={}
+local joinTouchTicker=0
+local joinTouchRadius=100
+
 Players.PlayerAdded:Connect(function(pl) trackedPlayers[pl]=true end)
 for _,pl in ipairs(Players:GetPlayers()) do trackedPlayers[pl]=true end
 Players.PlayerRemoving:Connect(function(pl) trackedPlayers[pl]=nil end)
 
 RunService.Heartbeat:Connect(function(dt)
-    espUpdateTick+=dt
-    monsterUpdateTick+=dt
-    autoTicker+=dt
-    pumpkinTicker+=dt
-    giftsTicker+=dt
-    joinTicker+=dt
-    safetyTicker+=dt
-    instantOpenTick+=dt
+    espUpdateTick=espUpdateTick+dt
+    monsterUpdateTick=monsterUpdateTick+dt
+    autoTicker=autoTicker+dt
+    pumpkinTicker=pumpkinTicker+dt
+    giftsTicker=giftsTicker+dt
+    joinGuiTicker=joinGuiTicker+dt
+    safetyTicker=safetyTicker+dt
+    instantOpenTick=instantOpenTick+dt
+    joinTouchTicker=joinTouchTicker+dt
 
     if safetyTicker>0.1 then
         safetyTicker=0
@@ -782,9 +896,9 @@ RunService.Heartbeat:Connect(function(dt)
         if autoGifts then collectGiftsOnce() end
     end
 
-    if joinTicker>0.5 then
-        joinTicker=0
-        if autoJoin then clickJoinButton() end
+    if joinGuiTicker>0.5 then
+        joinGuiTicker=0
+        if autoJoinGUI then clickJoinButton() end
     end
 
     if espUpdateTick>0.5 then
@@ -797,9 +911,7 @@ RunService.Heartbeat:Connect(function(dt)
         end
         if playerESPEnabled then
             for pl,_ in pairs(trackedPlayers) do
-                if pl~=LP and pl.Character then
-                    if playerESPEnabled then ensureHL(pl.Character,"KS_PlayerHL",Color3.fromRGB(0,255,0)) end
-                end
+                if pl~=LP and pl.Character then ensureHL(pl.Character,"KS_PlayerHL",Color3.fromRGB(0,255,0)) end
             end
         end
     end
@@ -820,7 +932,7 @@ RunService.Heartbeat:Connect(function(dt)
         end
     end
 
-    if instantOpenTick>0.18 then
+    if instantOpenTick>0.15 then
         instantOpenTick=0
         local r=hrp()
         if r then
@@ -832,17 +944,24 @@ RunService.Heartbeat:Connect(function(dt)
                         local d=(part.Position-rp).Magnitude
                         if d<=9 then
                             local key=pr:GetDebugId()
-                            if not instantOpenDebounce[key] or (time()-instantOpenDebounce[key])>1.0 then
-                                if pr.HoldDuration and pr.HoldDuration>0 then
-                                    firePrompt(pr,1.0)
-                                else
-                                    pressE(1,0.15)
-                                end
+                            if not instantOpenDebounce[key] or (time()-instantOpenDebounce[key])>0.9 then
+                                local holdSecs=getPromptHoldSeconds(pr)
+                                firePrompt(pr,holdSecs)
                                 instantOpenDebounce[key]=time()
                             end
                         end
                     end
                 end
+            end
+        end
+    end
+
+    if joinTouchTicker>0.25 then
+        joinTouchTicker=0
+        if autoJoinTouch and not safetyActive then
+            local entry=nearestJoinTouchPart(joinTouchRadius)
+            if entry and alive(entry.part) then
+                tpIntoPart(entry.part)
             end
         end
     end
