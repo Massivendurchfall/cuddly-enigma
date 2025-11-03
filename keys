@@ -43,8 +43,8 @@ local function ensureBillboard(part,name,text,color)
         g=Instance.new("BillboardGui")
         g.Name=name
         g.AlwaysOnTop=true
-        g.Size=UDim2.new(0,200,0,36)
-        g.StudsOffset=Vector3.new(0,3,0)
+        g.Size=UDim2.new(0,160,0,28)
+        g.StudsOffset=Vector3.new(0,2.4,0)
         g.Parent=part
         local l=Instance.new("TextLabel")
         l.Name="Label"
@@ -231,26 +231,16 @@ local autoGifts=false
 local autoJoin=false
 local autoFarm=false
 
-local function ensureMonsterTags()
-    local root=monstersRoot(); if not root then return end
-    for _,m in ipairs(root:GetChildren()) do
-        if isMonsterModel(m) then
-            if monsterESPEnabled then
-                ensureHL(m,"KS_MonHL",Color3.fromRGB(255,60,60))
-                local head=m:FindFirstChild("Head") or m:FindFirstChild("HumanoidRootPart")
-                if head then ensureBillboard(head,"KS_MonBB",m.Name,Color3.fromRGB(255,60,60)) end
-            else
-                clearChild(m,"KS_MonHL")
-                local head=m:FindFirstChild("Head") or m:FindFirstChild("HumanoidRootPart"); if head then clearChild(head,"KS_MonBB") end
-            end
-        end
-    end
-end
+local trackedPlayers={}
+local trackedMonsters={}
+local trackedKeyPrompts={}
+local trackedDoorModels={}
+local trackedDoorPrompts={}
+local doorParts=setmetatable({},{__mode="k"})
 
 local function isSpawnPointName(n) return typeof(n)=="string" and n:match("^SpawnPoint_%d+$")~=nil end
 local function isPointName(n) return typeof(n)=="string" and n:match("^Point_%d+$")~=nil end
 
-local keyPromptToPart=setmetatable({},{__mode="k"})
 local function nearestBasePartFrom(inst)
     local p=inst
     while p and not p:IsA("BasePart") do p=p.Parent end
@@ -293,21 +283,6 @@ local function isValidKeyPrompt(pr)
     return isItemSpawnPrompt(pr) or isDrawerPrompt(pr)
 end
 
-local function showKeyLabelFor(pr)
-    if not keysESPEnabled or not isValidKeyPrompt(pr) then return end
-    local part=nearestBasePartFrom(pr); if not part then return end
-    ensureBillboard(part,"KS_KeyBB","Key",Color3.fromRGB(0,170,255))
-    keyPromptToPart[pr]=part
-end
-
-local function clearKeyLabelFor(pr)
-    local part=keyPromptToPart[pr] or nearestBasePartFrom(pr)
-    if part then clearChild(part,"KS_KeyBB") end
-    keyPromptToPart[pr]=nil
-end
-
-local doorHooks={}
-local doorParts=setmetatable({},{__mode="k"})
 local function isDoorModel(inst) return inst and inst:IsA("Model") and inst.Name:match("^LockDoor_")~=nil end
 local function doorPrompt(m)
     local cp=m:FindFirstChild("ControlPart"); if not cp then return nil end
@@ -318,6 +293,7 @@ local function doorMainPart(m)
     local cp=m:FindFirstChild("ControlPart"); if cp and cp:IsA("BasePart") then return cp end
     return nil
 end
+
 local function tagDoor(m)
     if not doorsESPEnabled then
         clearChild(m,"KS_DoorHL")
@@ -327,11 +303,31 @@ local function tagDoor(m)
     ensureHL(m,"KS_DoorHL",Color3.fromRGB(255,170,0))
     local p=doorMainPart(m); if p then ensureBillboard(p,"KS_DoorBB","Doors",Color3.fromRGB(255,170,0)); doorParts[m]=p end
 end
-local function hookDoor(m)
-    if doorHooks[m] then return end
+
+local function trackDoor(m)
+    if trackedDoorModels[m] then return end
+    trackedDoorModels[m]=true
+    local pr=doorPrompt(m)
+    if pr then trackedDoorPrompts[pr]=true end
     tagDoor(m)
-    local a=m.AncestryChanged:Connect(function(_,p) if not p then clearChild(m,"KS_DoorHL"); local dp=doorParts[m] or doorMainPart(m); if dp then clearChild(dp,"KS_DoorBB") end doorHooks[m]=nil doorParts[m]=nil end end)
-    doorHooks[m]=a
+    m.AncestryChanged:Connect(function(_,p)
+        if not p then
+            trackedDoorModels[m]=nil
+            local dp=doorParts[m] or doorMainPart(m)
+            if dp then clearChild(dp,"KS_DoorBB") end
+            clearChild(m,"KS_DoorHL")
+        end
+    end)
+    if pr then
+        pr.AncestryChanged:Connect(function(_,p) if not p then trackedDoorPrompts[pr]=nil end end)
+        pr:GetPropertyChangedSignal("Enabled"):Connect(function() end)
+    end
+end
+
+local function showKeyLabelFor(pr)
+    if not keysESPEnabled or not isValidKeyPrompt(pr) then return end
+    local part=nearestBasePartFrom(pr); if not part then return end
+    ensureBillboard(part,"KS_KeyBB","Key",Color3.fromRGB(0,170,255))
 end
 
 local function attachMap(map)
@@ -344,7 +340,7 @@ local function attachMap(map)
                     for _,pt in ipairs(sp:GetChildren()) do
                         if isPointName(pt.Name) then
                             local ip=pt:FindFirstChild("InteractPrompt",true) or pt:FindFirstChildWhichIsA("ProximityPrompt",true)
-                            if ip then showKeyLabelFor(ip) end
+                            if ip and isValidKeyPrompt(ip) then trackedKeyPrompts[ip]=true if keysESPEnabled then showKeyLabelFor(ip) end end
                         end
                     end
                 end
@@ -355,14 +351,14 @@ local function attachMap(map)
                 for _,sp in ipairs(dc:GetChildren()) do
                     if isSpawnPointName(sp.Name) then
                         local ip=sp:FindFirstChild("InteractPrompt",true) or sp:FindFirstChildWhichIsA("ProximityPrompt",true)
-                        if ip then showKeyLabelFor(ip) end
+                        if ip and isValidKeyPrompt(ip) then trackedKeyPrompts[ip]=true if keysESPEnabled then showKeyLabelFor(ip) end end
                     end
                 end
             end
         end
         local ip=ih:FindFirstChild("ItemPlace")
         if ip then
-            for _,d in ipairs(ip:GetChildren()) do if isDoorModel(d) then hookDoor(d) end end
+            for _,d in ipairs(ip:GetChildren()) do if isDoorModel(d) then trackDoor(d) end end
         end
     end
 end
@@ -373,26 +369,29 @@ if maps then
     maps.DescendantAdded:Connect(function(d)
         if not alive(d) then return end
         if d:IsA("ProximityPrompt") or d.Name=="InteractPrompt" then
-            if isValidKeyPrompt(d) then showKeyLabelFor(d) end
+            if isValidKeyPrompt(d) then trackedKeyPrompts[d]=true if keysESPEnabled then showKeyLabelFor(d) end end
         end
-        if isDoorModel(d) then hookDoor(d) end
+        if isDoorModel(d) then trackDoor(d) end
     end)
     maps.DescendantRemoving:Connect(function(d)
-        if d:IsA("ProximityPrompt") or d.Name=="InteractPrompt" then clearKeyLabelFor(d) end
-        if isDoorModel(d) then
-            if doorHooks[d] then pcall(function() doorHooks[d]:Disconnect() end) doorHooks[d]=nil end
-            clearChild(d,"KS_DoorHL")
-            local dp=doorParts[d] or doorMainPart(d); if dp then clearChild(dp,"KS_DoorBB") end
-            doorParts[d]=nil
+        if (d:IsA("ProximityPrompt") or d.Name=="InteractPrompt") and trackedKeyPrompts[d] then
+            trackedKeyPrompts[d]=nil
+            local part=nearestBasePartFrom(d); if part then clearChild(part,"KS_KeyBB") end
         end
+        if isDoorModel(d) and trackedDoorModels[d] then
+            trackedDoorModels[d]=nil
+            local dp=doorParts[d] or doorMainPart(d); if dp then clearChild(dp,"KS_DoorBB") end
+            clearChild(d,"KS_DoorHL")
+        end
+        if trackedDoorPrompts[d] then trackedDoorPrompts[d]=nil end
     end)
 end
 
 local function availableKeys()
     local res={}
-    for pr,_ in pairs(keyPromptToPart) do
+    for pr,_ in pairs(trackedKeyPrompts) do
         if alive(pr) and isValidKeyPrompt(pr) then
-            local part=keyPromptToPart[pr]
+            local part=nearestBasePartFrom(pr)
             if part and alive(part) then table.insert(res,{prompt=pr,part=part}) end
         end
     end
@@ -401,21 +400,12 @@ end
 
 local function availableDoors()
     local res={}
-    if not maps then return res end
-    for _,map in ipairs(maps:GetChildren()) do
-        local ih=map:FindFirstChild("ItemHuntFolder")
-        local ip=ih and ih:FindFirstChild("ItemPlace")
-        if ip then
-            for _,m in ipairs(ip:GetChildren()) do
-                if isDoorModel(m) then
-                    local pr=doorPrompt(m)
-                    local cp=m:FindFirstChild("ControlPart")
-                    local pp=cp and cp:IsA("BasePart") and cp or doorMainPart(m)
-                    if pr and cp and pp then
-                        table.insert(res,{model=m,prompt=pr,part=pp})
-                    end
-                end
-            end
+    for m,_ in pairs(trackedDoorModels) do
+        if alive(m) and isDoorModel(m) then
+            local pr=doorPrompt(m)
+            local cp=m:FindFirstChild("ControlPart")
+            local pp=cp and cp:IsA("BasePart") and cp or doorMainPart(m)
+            if pr and cp and pp then table.insert(res,{model=m,prompt=pr,part=pp}) end
         end
     end
     return res
@@ -439,7 +429,7 @@ local function anyDoor()
 end
 
 local function pressE(times,holdSeconds)
-    local vim=game:GetService("VirtualInputManager")
+    local vim=VirtualInputManager
     times=times or 1
     for i=1,math.max(1,times) do
         vim:SendKeyEvent(true,Enum.KeyCode.E,false,game)
@@ -453,9 +443,7 @@ local function pressE(times,holdSeconds)
     if holdSeconds and holdSeconds>0 then
         vim:SendKeyEvent(true,Enum.KeyCode.E,false,game)
         local t0=os.clock()
-        while os.clock()-t0<holdSeconds do
-            task.wait(0.05)
-        end
+        while os.clock()-t0<holdSeconds do task.wait(0.04) end
         vim:SendKeyEvent(false,Enum.KeyCode.E,false,game)
     end
 end
@@ -557,10 +545,7 @@ local function joinHeaderVisible()
     if cachedJoinLabel and cachedJoinLabel.Parent and visibleDeep(cachedJoinLabel) then return true end
     local best=nil
     for _,d in ipairs(pg:GetDescendants()) do
-        if d:IsA("TextLabel") and visibleDeep(d) and isJoinText(d.Text) then
-            best=d
-            break
-        end
+        if d:IsA("TextLabel") and visibleDeep(d) and isJoinText(d.Text) then best=d break end
     end
     cachedJoinLabel=best
     return best~=nil
@@ -572,10 +557,7 @@ local function findJoinButtonSmart()
     for _,d in ipairs(pg:GetDescendants()) do
         if (d:IsA("TextButton") or d:IsA("ImageButton")) and visibleDeep(d) then
             local sc=scoreButton(d)
-            if sc>bestScore then
-                bestScore=sc
-                bestBtn=d
-            end
+            if sc>bestScore then bestScore=sc bestBtn=d end
         end
     end
     if not bestBtn then return nil end
@@ -583,9 +565,7 @@ local function findJoinButtonSmart()
 end
 local function fires(btn,ev)
     if not btn then return end
-    if firesignal then
-        pcall(function() firesignal(btn[ev],btn) end)
-    end
+    if firesignal then pcall(function() firesignal(btn[ev],btn) end) end
 end
 local function robustClick(btn)
     if not btn or not btn.Parent then return end
@@ -606,9 +586,7 @@ local function buttonIsTopMostAtCenter(btn)
     if not arr or #arr==0 then return true end
     for _,o in ipairs(arr) do
         if o==btn or o:IsDescendantOf(btn) then return true end
-        if o.Active and o.Visible then
-            return o==btn
-        end
+        if o.Active and o.Visible then return o==btn end
     end
     return false
 end
@@ -653,25 +631,33 @@ end})
 TabESP:CreateSection("Monsters")
 TabESP:CreateToggle({Name="Monster ESP",CurrentValue=false,Flag="ESP_Monster",Callback=function(s)
     monsterESPEnabled=s
-    ensureMonsterTags()
+    if s then
+        for _,m in ipairs((monstersRoot() and monstersRoot():GetChildren()) or {}) do
+            if isMonsterModel(m) then ensureHL(m,"KS_MonHL",Color3.fromRGB(255,60,60)) local head=m:FindFirstChild("Head") or m:FindFirstChild("HumanoidRootPart"); if head then ensureBillboard(head,"KS_MonBB",m.Name,Color3.fromRGB(255,60,60)) end end
+        end
+    else
+        for _,m in ipairs((monstersRoot() and monstersRoot():GetChildren()) or {}) do
+            clearChild(m,"KS_MonHL"); local head=m:FindFirstChild("Head") or m:FindFirstChild("HumanoidRootPart"); if head then clearChild(head,"KS_MonBB") end
+        end
+    end
 end})
 
 TabESP:CreateSection("Keys")
 TabESP:CreateToggle({Name="Keys ESP",CurrentValue=false,Flag="ESP_Keys",Callback=function(s)
     keysESPEnabled=s
     if not s then
-        for pr,part in pairs(keyPromptToPart) do if part then clearChild(part,"KS_KeyBB") end end
+        for pr,_ in pairs(trackedKeyPrompts) do local part=nearestBasePartFrom(pr); if part then clearChild(part,"KS_KeyBB") end end
         clearAllByName("KS_KeyBB")
     else
-        for pr,_ in pairs(keyPromptToPart) do if alive(pr) and isValidKeyPrompt(pr) then showKeyLabelFor(pr) end end
+        for pr,_ in pairs(trackedKeyPrompts) do if alive(pr) and isValidKeyPrompt(pr) then showKeyLabelFor(pr) end end
     end
 end})
 
 TabESP:CreateSection("Doors")
 TabESP:CreateToggle({Name="Door ESP",CurrentValue=false,Flag="ESP_Doors",Callback=function(s)
     doorsESPEnabled=s
-    for m,_ in pairs(doorHooks) do if alive(m) and isDoorModel(m) then tagDoor(m) end end
-    if not s then for m,p in pairs(doorParts) do if alive(m) then clearChild(m,"KS_DoorHL") end if p then clearChild(p,"KS_DoorBB") end end clearAllByName("KS_DoorBB") end
+    if s then for m,_ in pairs(trackedDoorModels) do if alive(m) then tagDoor(m) end end
+    else for m,_ in pairs(trackedDoorModels) do clearChild(m,"KS_DoorHL"); local p=doorMainPart(m); if p then clearChild(p,"KS_DoorBB") end end clearAllByName("KS_DoorBB") end
 end})
 
 TabAuto:CreateSection("Events")
@@ -691,14 +677,9 @@ local function spamNearbyPrompts(radius,pressTimes)
     local r=hrp(); if not r then return end
     local root=r.Position
     local near={}
-    for _,d in ipairs(Workspace:GetDescendants()) do
-        if d:IsA("ProximityPrompt") then
-            local p=d.Parent
-            local bp=(p and p:IsA("BasePart")) and p or (p and p:FindFirstChildWhichIsA("BasePart",true))
-            if bp and (bp.Position-root).Magnitude<=radius then
-                table.insert(near,d)
-            end
-        end
+    for pr,_ in pairs(trackedKeyPrompts) do
+        local bp=nearestBasePartFrom(pr)
+        if bp and (bp.Position-root).Magnitude<=radius then table.insert(near,pr) end
     end
     for i=1,pressTimes do
         for _,pp in ipairs(near) do pcall(function() firePrompt(pp,0.05) end) end
@@ -744,14 +725,16 @@ local function doAutoFarmStep()
     if autoFarm and not safetyActive then task.defer(doAutoFarmStep) end
 end
 
-local espTicker=0
+local espUpdateTick=0
+local monsterUpdateTick=0
 local autoTicker=0
 local pumpkinTicker=0
 local giftsTicker=0
 local joinTicker=0
 local safetyTicker=0
-
+local instantOpenTick=0
 local instantOpenDebounce={}
+
 local function isDoorPromptInstance(p)
     if not p then return false end
     local n=p
@@ -762,24 +745,19 @@ local function isDoorPromptInstance(p)
     return false
 end
 
+Players.PlayerAdded:Connect(function(pl) trackedPlayers[pl]=true end)
+for _,pl in ipairs(Players:GetPlayers()) do trackedPlayers[pl]=true end
+Players.PlayerRemoving:Connect(function(pl) trackedPlayers[pl]=nil end)
+
 RunService.Heartbeat:Connect(function(dt)
-    espTicker+=dt
+    espUpdateTick+=dt
+    monsterUpdateTick+=dt
     autoTicker+=dt
     pumpkinTicker+=dt
     giftsTicker+=dt
     joinTicker+=dt
     safetyTicker+=dt
-
-    if espTicker>0.25 then
-        espTicker=0
-        if monsterESPEnabled then ensureMonsterTags() end
-        if keysESPEnabled then
-            for pr,part in pairs(keyPromptToPart) do if alive(pr) and isValidKeyPrompt(pr) then showKeyLabelFor(pr) end end
-        else
-            for _,part in pairs(keyPromptToPart) do if part then clearChild(part,"KS_KeyBB") end end
-        end
-        if doorsESPEnabled then for m,_ in pairs(doorHooks) do if alive(m) and isDoorModel(m) then tagDoor(m) end end else for m,p in pairs(doorParts) do if alive(m) then clearChild(m,"KS_DoorHL") end if p then clearChild(p,"KS_DoorBB") end end end
-    end
+    instantOpenTick+=dt
 
     if safetyTicker>0.1 then
         safetyTicker=0
@@ -809,22 +787,59 @@ RunService.Heartbeat:Connect(function(dt)
         if autoJoin then clickJoinButton() end
     end
 
-    local r=hrp()
-    if r then
-        for _,pp in ipairs(Workspace:GetDescendants()) do
-            if pp:IsA("ProximityPrompt") and pp.Enabled and isDoorPromptInstance(pp) then
-                local part=nearestBasePartFrom(pp)
-                if part then
-                    local d=(part.Position-r.Position).Magnitude
-                    if d<=9 then
-                        local key=pp:GetDebugId()
-                        if not instantOpenDebounce[key] or (time()-instantOpenDebounce[key])>1.0 then
-                            if pp.HoldDuration and pp.HoldDuration>0 then
-                                firePrompt(pp,1.1)
-                            else
-                                pressE(1,0.2)
+    if espUpdateTick>0.5 then
+        espUpdateTick=0
+        if keysESPEnabled then
+            for pr,_ in pairs(trackedKeyPrompts) do if alive(pr) and isValidKeyPrompt(pr) then showKeyLabelFor(pr) end end
+        end
+        if doorsESPEnabled then
+            for m,_ in pairs(trackedDoorModels) do if alive(m) then tagDoor(m) end end
+        end
+        if playerESPEnabled then
+            for pl,_ in pairs(trackedPlayers) do
+                if pl~=LP and pl.Character then
+                    if playerESPEnabled then ensureHL(pl.Character,"KS_PlayerHL",Color3.fromRGB(0,255,0)) end
+                end
+            end
+        end
+    end
+
+    if monsterUpdateTick>1.0 then
+        monsterUpdateTick=0
+        if monsterESPEnabled then
+            local root=monstersRoot()
+            if root then
+                for _,m in ipairs(root:GetChildren()) do
+                    if isMonsterModel(m) then
+                        ensureHL(m,"KS_MonHL",Color3.fromRGB(255,60,60))
+                        local head=m:FindFirstChild("Head") or m:FindFirstChild("HumanoidRootPart")
+                        if head then ensureBillboard(head,"KS_MonBB",m.Name,Color3.fromRGB(255,60,60)) end
+                    end
+                end
+            end
+        end
+    end
+
+    if instantOpenTick>0.18 then
+        instantOpenTick=0
+        local r=hrp()
+        if r then
+            local rp=r.Position
+            for pr,_ in pairs(trackedDoorPrompts) do
+                if alive(pr) and pr.Enabled and isDoorPromptInstance(pr) then
+                    local part=nearestBasePartFrom(pr)
+                    if part then
+                        local d=(part.Position-rp).Magnitude
+                        if d<=9 then
+                            local key=pr:GetDebugId()
+                            if not instantOpenDebounce[key] or (time()-instantOpenDebounce[key])>1.0 then
+                                if pr.HoldDuration and pr.HoldDuration>0 then
+                                    firePrompt(pr,1.0)
+                                else
+                                    pressE(1,0.15)
+                                end
+                                instantOpenDebounce[key]=time()
                             end
-                            instantOpenDebounce[key]=time()
                         end
                     end
                 end
