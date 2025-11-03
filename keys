@@ -6,9 +6,11 @@ local StarterGui=game:GetService("StarterGui")
 local VirtualUser=game:GetService("VirtualUser")
 local GuiService=game:GetService("GuiService")
 local VirtualInputManager=game:GetService("VirtualInputManager")
+local PromptService=game:GetService("ProximityPromptService")
 
 local LP=Players.LocalPlayer
 local Rayfield=loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+PromptService.Enabled=true
 
 local function alive(o) return pcall(function() return o and o.Parent end) and o.Parent~=nil end
 local function firstPart(x)
@@ -89,6 +91,13 @@ end
 if LP.Character then onChar(LP.Character) end
 LP.CharacterAdded:Connect(onChar)
 
+local function hrp()
+    local c=LP.Character; if not c then return nil end
+    return c:FindFirstChild("HumanoidRootPart")
+end
+local function tp(cf)
+    local r=hrp(); if r then r.CFrame=cf end
+end
 local noclipConn=nil
 local function setNoclip(state)
     if state and not noclipConn then
@@ -104,7 +113,6 @@ local function setNoclip(state)
         if c then for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=true end end end
     end
 end
-
 local flyConn=nil
 local function dirInput()
     local v=Vector3.zero
@@ -120,8 +128,8 @@ local function setFly(state)
     if state and not flyConn then
         flyConn=RunService.Heartbeat:Connect(function()
             local c=LP.Character; if not c then return end
-            local hrp=c:FindFirstChild("HumanoidRootPart"); local hum=c:FindFirstChildOfClass("Humanoid")
-            if not hrp or not hum then return end
+            local r=c:FindFirstChild("HumanoidRootPart"); local hum=c:FindFirstChildOfClass("Humanoid")
+            if not r or not hum then return end
             hum.PlatformStand=true
             local cam=Workspace.CurrentCamera
             local v=dirInput()
@@ -131,9 +139,9 @@ local function setFly(state)
                 local right=cam.CFrame.RightVector
                 local up=Vector3.new(0,1,0)
                 local move=(right*v.X+up*v.Y+look*-v.Z)*80
-                hrp.AssemblyLinearVelocity=Vector3.new(move.X,move.Y,move.Z)
+                r.AssemblyLinearVelocity=Vector3.new(move.X,move.Y,move.Z)
             else
-                hrp.AssemblyLinearVelocity=hrp.AssemblyLinearVelocity*0.9
+                r.AssemblyLinearVelocity=r.AssemblyLinearVelocity*0.9
             end
         end)
     elseif not state and flyConn then
@@ -142,7 +150,6 @@ local function setFly(state)
         if hum then hum.PlatformStand=false end
     end
 end
-
 local antiAfkConn=nil
 local function setAntiAfk(state)
     if state and not antiAfkConn then
@@ -176,14 +183,20 @@ local safetyReturnCF=nil
 local safetyElevCF=nil
 local safetyThreatRadius=12
 local safetyElevate=70
-local safetyClearSeconds=5.0
+local safetyClearSeconds=8.0
 local safetyClearTimer=0
-local function hrp()
-    local c=LP.Character; if not c then return nil end
-    return c:FindFirstChild("HumanoidRootPart")
+local function lookAt(part)
+    local r=hrp(); if not r or not part then return end
+    local rp=r.Position
+    local pp=part.Position
+    local look=Vector3.new(pp.X,rp.Y,pp.Z)
+    r.CFrame=CFrame.new(rp,look)
 end
-local function tp(cf)
-    local r=hrp(); if r then r.CFrame=cf end
+local function aimCam(part)
+    local cam=Workspace.CurrentCamera
+    local r=hrp(); if not r or not part then return end
+    local pos=cam.CFrame.Position
+    cam.CFrame=CFrame.new(pos,part.Position)
 end
 local function gameFolder() return Workspace:FindFirstChild("Game") end
 local function monstersRoot() local g=gameFolder(); if not g then return nil end; return g:FindFirstChild("GamePlayers") end
@@ -232,17 +245,21 @@ local doorsESPEnabled=false
 local autoPumpkins=false
 local autoGifts=false
 local autoJoinTouch=true
+local autoEscape=true
 local autoFarm=false
 
-local coopDelayPickup=1.0
-local coopDelayDoor=1.0
-local coopDelayInstant=1.0
+local coopDelayPickup=1.2
+local coopDelayDoor=0.7
+local coopDelayInstant=0.9
+local slowStep=0.6
 
 local trackedPlayers={}
 local trackedKeyPrompts={}
 local trackedDoorModels={}
 local trackedDoorPrompts={}
 local doorParts=setmetatable({},{__mode="k"})
+local seenDoorEnabled={}
+local seenDoorPromptObj={}
 
 local function isSpawnPointName(n) return typeof(n)=="string" and n:match("^SpawnPoint_%d+$")~=nil end
 local function isPointName(n) return typeof(n)=="string" and n:match("^Point_%d+$")~=nil end
@@ -310,24 +327,67 @@ local function tagDoor(m)
     local p=doorMainPart(m); if p then ensureBillboard(p,"KS_DoorBB","Doors",Color3.fromRGB(255,170,0)); doorParts[m]=p end
 end
 
+local function gotoDoorAndOpen(m,pr)
+    local part=doorMainPart(m)
+    if not part then return end
+    local r=hrp(); if not r then return end
+    local target=part.CFrame+part.CFrame.LookVector*2
+    tp(target)
+    task.wait(0.5)
+    lookAt(part)
+    aimCam(part)
+    task.wait(coopDelayDoor)
+    if pr and alive(pr) then
+        local orig=pr.Enabled
+        pcall(function() pr.Enabled=true end)
+        if fireproximityprompt then pcall(function() fireproximityprompt(pr,0) end) else
+            VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.E,false,game); task.wait(0.05); VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.E,false,game)
+        end
+        task.delay(0.2,function() pcall(function() pr.Enabled=orig end) end)
+    end
+end
+
 local function trackDoor(m)
     if trackedDoorModels[m] then return end
     trackedDoorModels[m]=true
     local pr=doorPrompt(m)
-    if pr then trackedDoorPrompts[pr]=true end
+    if pr then
+        trackedDoorPrompts[pr]=true
+        seenDoorPromptObj[pr]=true
+        if pr.Enabled then seenDoorEnabled[m]=true end
+        pr.AncestryChanged:Connect(function(_,p)
+            if not p then trackedDoorPrompts[pr]=nil seenDoorPromptObj[pr]=nil end
+        end)
+        pr:GetPropertyChangedSignal("Enabled"):Connect(function()
+            if not alive(m) or not alive(pr) then return end
+            if pr.Enabled and autoEscape and not seenDoorEnabled[m] then
+                seenDoorEnabled[m]=true
+                gotoDoorAndOpen(m,pr)
+            end
+        end)
+    end
     tagDoor(m)
+    m.DescendantAdded:Connect(function(d)
+        if not alive(d) then return end
+        if (d:IsA("ProximityPrompt") or d.Name=="InteractPrompt") and not seenDoorPromptObj[d] then
+            seenDoorPromptObj[d]=true
+            trackedDoorPrompts[d]=true
+            if autoEscape then gotoDoorAndOpen(m,d) end
+            d:GetPropertyChangedSignal("Enabled"):Connect(function()
+                if alive(d) and d.Enabled and autoEscape then gotoDoorAndOpen(m,d) end
+            end)
+            d.AncestryChanged:Connect(function(_,p) if not p then trackedDoorPrompts[d]=nil seenDoorPromptObj[d]=nil end end)
+        end
+    end)
     m.AncestryChanged:Connect(function(_,p)
         if not p then
             trackedDoorModels[m]=nil
             local dp=doorParts[m] or doorMainPart(m)
             if dp then clearChild(dp,"KS_DoorBB") end
             clearChild(m,"KS_DoorHL")
+            seenDoorEnabled[m]=nil
         end
     end)
-    if pr then
-        pr.AncestryChanged:Connect(function(_,p) if not p then trackedDoorPrompts[pr]=nil end end)
-        pr:GetPropertyChangedSignal("Enabled"):Connect(function() end)
-    end
 end
 
 local function showKeyLabelFor(pr)
@@ -389,7 +449,7 @@ if maps then
             local dp=doorParts[d] or doorMainPart(d); if dp then clearChild(dp,"KS_DoorBB") end
             clearChild(d,"KS_DoorHL")
         end
-        if trackedDoorPrompts[d] then trackedDoorPrompts[d]=nil end
+        if trackedDoorPrompts[d] then trackedDoorPrompts[d]=nil seenDoorPromptObj[d]=nil end
     end)
 end
 
@@ -460,54 +520,6 @@ local function pressE(times,holdSeconds)
     end
 end
 
-local function firePrompt(pp,hold)
-    if not pp then return end
-    if fireproximityprompt then
-        pcall(function() fireproximityprompt(pp,hold or 1) end)
-    else
-        pressE(1,hold)
-    end
-end
-
-local function tryTouch(part)
-    local r=hrp(); if not r or not part then return end
-    if firetouchinterest then
-        pcall(function() firetouchinterest(r,part,0) end)
-        task.wait(0.05)
-        pcall(function() firetouchinterest(r,part,1) end)
-    end
-end
-
-local function collectPumpkinsOnce()
-    if not maps then return end
-    for _,map in ipairs(maps:GetChildren()) do
-        local rei=map:FindFirstChild("RobloxEventItem")
-        if rei then
-            for _,h in ipairs(rei:GetChildren()) do
-                if h and h.Name=="HideItem" and h:IsA("BasePart") then
-                    local tt=h:FindFirstChildOfClass("TouchTransmitter")
-                    if tt then tryTouch(h) end
-                end
-            end
-        end
-    end
-end
-
-local function collectGiftsOnce()
-    local g=gameFolder()
-    if not g then return end
-    local pof=g:FindFirstChild("PlaceObjectFolder")
-    if not pof then return end
-    for _,box in ipairs(pof:GetChildren()) do
-        if box.Name=="MouseGiftBox" then
-            local collide=box:FindFirstChild("Collide")
-            if collide and collide:IsA("BasePart") and collide:FindFirstChildOfClass("TouchTransmitter") then
-                tryTouch(collide)
-            end
-        end
-    end
-end
-
 local function forceInstantPrompt(pr)
     if not alive(pr) or not pr.Enabled then return end
     local origEnabled=pr.Enabled
@@ -553,12 +565,14 @@ local function holdDoorPrompt(entry)
     local pr=entry and entry.prompt
     local part=entry and entry.part
     if not (pr and part) then return end
-    local cf=part.CFrame+part.CFrame.LookVector*2
-    tp(cf)
-    task.wait(0.9)
+    local target=part.CFrame+part.CFrame.LookVector*2
+    tp(target)
+    task.wait(0.6)
+    lookAt(part)
+    aimCam(part)
     task.wait(coopDelayDoor)
     forceInstantPrompt(pr)
-    task.wait(0.3)
+    task.wait(0.25)
 end
 
 local farmBusy=false
@@ -573,10 +587,13 @@ local function doAutoFarmStep()
         local near=availableKeysNear(14)
         for _,pr in ipairs(near) do pcall(function() forceInstantPrompt(pr) end) end
         pressE(1,0)
-        task.wait(0.2)
+        task.wait(slowStep)
     end
     local door=anyDoor()
-    if door and door.part and door.prompt then holdDoorPrompt(door) end
+    if door and door.part and door.prompt then
+        holdDoorPrompt(door)
+        task.wait(slowStep)
+    end
     farmBusy=false
 end
 
@@ -588,7 +605,8 @@ local function findTouchOn(part)
     local tt=part:FindFirstChildOfClass("TouchTransmitter")
     if tt then return tt end
     for _,c in ipairs(part:GetChildren()) do
-        if string.lower(c.Name)=="touchinterest" or string.lower(c.Name)=="touchtransmitter" then return c end
+        local n=string.lower(c.Name)
+        if n=="touchinterest" or n=="touchtransmitter" then return c end
     end
     return nil
 end
@@ -649,30 +667,38 @@ Workspace.DescendantRemoving:Connect(function(d)
     end
 end)
 
-local function nearestJoinTouchPart(maxDist)
-    local r=hrp(); if not r then return nil end
-    local rp=r.Position
-    local best,bestd=nil,math.huge
-    for _,e in ipairs(joinTouchParts) do
-        if alive(e.part) then
-            local d=(e.part.Position-rp).Magnitude
-            if d<bestd then bestd=d best=e end
-        end
+local function tryTouch(part)
+    local r=hrp(); if not r or not part then return end
+    if firetouchinterest then
+        pcall(function() firetouchinterest(r,part,0) end)
+        task.wait(0.05)
+        pcall(function() firetouchinterest(r,part,1) end)
     end
-    if best and bestd<=maxDist then return best,bestd end
-    return nil
 end
 
-local function tpIntoPart(part)
+local function stopMotion()
+    local r=hrp(); local c=LP.Character; if not r or not c then return end
+    local hum=c:FindFirstChildOfClass("Humanoid")
+    r.AssemblyLinearVelocity=Vector3.zero
+    r.AssemblyAngularVelocity=Vector3.zero
+    if hum then hum:Move(Vector3.zero) end
+    VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.W,false,game)
+    VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.S,false,game)
+    VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.A,false,game)
+    VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.D,false,game)
+end
+
+local function tpIntoPart(part,forwardSeconds)
     local r=hrp(); if not r then return end
     r.CFrame=part.CFrame+Vector3.new(0,2,0)
     task.wait(0.03)
-    r.CFrame=r.CFrame+ r.CFrame.LookVector*1.5
-    r.AssemblyLinearVelocity=r.CFrame.LookVector*25
+    r.CFrame=r.CFrame+ r.CFrame.LookVector*1.2
+    r.AssemblyLinearVelocity=r.CFrame.LookVector*10
     tryTouch(part)
     VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.W,false,game)
-    task.wait(0.2)
+    task.wait(forwardSeconds or 0.12)
     VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.W,false,game)
+    stopMotion()
 end
 
 TabESP:CreateSection("Players")
@@ -731,6 +757,7 @@ TabAuto:CreateSection("Events")
 TabAuto:CreateToggle({Name="Auto-Collect Pumpkins",CurrentValue=false,Flag="AutoPumpkins",Callback=function(s) autoPumpkins=s end})
 TabAuto:CreateToggle({Name="Auto-Collect GiftBoxes",CurrentValue=false,Flag="AutoGifts",Callback=function(s) autoGifts=s end})
 TabAuto:CreateToggle({Name="Auto-Join (Touch 100)",CurrentValue=true,Flag="AutoJoinTouch",Callback=function(s) autoJoinTouch=s end})
+TabAuto:CreateToggle({Name="Auto-Escape (Exit Door)",CurrentValue=true,Flag="AutoEscape",Callback=function(s) autoEscape=s end})
 
 TabAuto:CreateSection("Farm")
 TabAuto:CreateToggle({Name="Auto-Farm (Key -> Door)",CurrentValue=false,Flag="AutoFarm",Callback=function(s) autoFarm=s end})
@@ -744,13 +771,43 @@ local safetyTicker=0
 local instantOpenTick=0
 local joinTouchTicker=0
 local joinTouchRadius=100
-
 local instantOpenDebounce={}
 local instantSeenAt={}
+local joinCooldownEnd=0
 
 for _,pl in ipairs(Players:GetPlayers()) do trackedPlayers[pl]=true end
 Players.PlayerAdded:Connect(function(pl) trackedPlayers[pl]=true end)
 Players.PlayerRemoving:Connect(function(pl) trackedPlayers[pl]=nil end)
+
+local function collectPumpkinsOnce()
+    if not maps then return end
+    for _,map in ipairs(maps:GetChildren()) do
+        local rei=map:FindFirstChild("RobloxEventItem")
+        if rei then
+            for _,h in ipairs(rei:GetChildren()) do
+                if h and h.Name=="HideItem" and h:IsA("BasePart") then
+                    local tt=h:FindFirstChildOfClass("TouchTransmitter")
+                    if tt then tryTouch(h) end
+                end
+            end
+        end
+    end
+end
+
+local function collectGiftsOnce()
+    local gameFolder=Workspace:FindFirstChild("Game")
+    if not gameFolder then return end
+    local pof=gameFolder:FindFirstChild("PlaceObjectFolder")
+    if not pof then return end
+    for _,box in ipairs(pof:GetChildren()) do
+        if box.Name=="MouseGiftBox" then
+            local collide=box:FindFirstChild("Collide")
+            if collide and collide:IsA("BasePart") and collide:FindFirstChildOfClass("TouchTransmitter") then
+                tryTouch(collide)
+            end
+        end
+    end
+end
 
 RunService.Heartbeat:Connect(function(dt)
     espUpdateTick=espUpdateTick+dt
@@ -780,22 +837,22 @@ RunService.Heartbeat:Connect(function(dt)
             if safetyClearTimer>=safetyClearSeconds then
                 safetyActive=false
                 safetyClearTimer=0
-                if safetyReturnCF then tp(safetyReturnCF) end
+                if safetyReturnCF then tp(safetyReturnCF) stopMotion() end
             end
         end
     end
 
-    if autoTicker>0.7 then
+    if autoTicker>1.0 then
         autoTicker=0
         if autoFarm and not safetyActive then doAutoFarmStep() end
     end
 
-    if pumpkinTicker>0.9 then
+    if pumpkinTicker>1.0 then
         pumpkinTicker=0
         if autoPumpkins then collectPumpkinsOnce() end
     end
 
-    if giftsTicker>1.2 then
+    if giftsTicker>1.4 then
         giftsTicker=0
         if autoGifts then collectGiftsOnce() end
     end
@@ -848,6 +905,8 @@ RunService.Heartbeat:Connect(function(dt)
                                 if not instantSeenAt[key] then instantSeenAt[key]=now end
                                 if now-(instantSeenAt[key] or now)>=coopDelayInstant then
                                     if not instantOpenDebounce[key] or (now-instantOpenDebounce[key])>0.6 then
+                                        lookAt(part)
+                                        aimCam(part)
                                         forceInstantPrompt(pr)
                                         instantOpenDebounce[key]=now
                                         instantSeenAt[key]=nil
@@ -866,8 +925,25 @@ RunService.Heartbeat:Connect(function(dt)
     if joinTouchTicker>0.25 then
         joinTouchTicker=0
         if autoJoinTouch and not safetyActive then
-            local entry=nearestJoinTouchPart(joinTouchRadius)
-            if entry and alive(entry.part) then tpIntoPart(entry.part) end
+            local now=time()
+            if now>=joinCooldownEnd then
+                local r=hrp()
+                local entry=nil
+                local bestd=math.huge
+                if r then
+                    local rp=r.Position
+                    for _,e in ipairs(joinTouchParts) do
+                        if alive(e.part) then
+                            local d=(e.part.Position-rp).Magnitude
+                            if d<bestd then bestd=d entry=e end
+                        end
+                    end
+                end
+                if entry and bestd<=joinTouchRadius then
+                    tpIntoPart(entry.part,0.12)
+                    joinCooldownEnd=now+6.0
+                end
+            end
         end
     end
 end)
