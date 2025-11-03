@@ -4,6 +4,8 @@ local Workspace=game:GetService("Workspace")
 local UserInputService=game:GetService("UserInputService")
 local StarterGui=game:GetService("StarterGui")
 local VirtualUser=game:GetService("VirtualUser")
+local GuiService=game:GetService("GuiService")
+local VirtualInputManager=game:GetService("VirtualInputManager")
 
 local LP=Players.LocalPlayer
 local Rayfield=loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
@@ -323,7 +325,7 @@ local function tagDoor(m)
         return
     end
     ensureHL(m,"KS_DoorHL",Color3.fromRGB(255,170,0))
-    local p=doorMainPart(m); if p then ensureBillboard(p,"KS_DoorBB","Door",Color3.fromRGB(255,170,0)); doorParts[m]=p end
+    local p=doorMainPart(m); if p then ensureBillboard(p,"KS_DoorBB","Doors",Color3.fromRGB(255,170,0)); doorParts[m]=p end
 end
 local function hookDoor(m)
     if doorHooks[m] then return end
@@ -441,9 +443,9 @@ local function pressE(times,holdSeconds)
     times=times or 1
     for i=1,math.max(1,times) do
         vim:SendKeyEvent(true,Enum.KeyCode.E,false,game)
-        task.wait(0.05)
+        task.wait(0.06)
         vim:SendKeyEvent(false,Enum.KeyCode.E,false,game)
-        task.wait(0.05)
+        task.wait(0.06)
         if safetyEnabled and not safetyActive then
             local r=hrp(); if r and nearestMonsterDist(r.Position)<10 then return end
         end
@@ -510,79 +512,130 @@ local lastJoinSignature=nil
 local cachedJoinBtn=nil
 local cachedJoinLabel=nil
 local nextScanAt=0
+local joinDebounceUntil=0
 
+local function str(s)
+    if typeof(s)~="string" then return "" end
+    return string.lower((s:gsub("%s+"," ")))
+end
+local function isJoinText(t)
+    t=str(t)
+    if t=="" then return false end
+    return t:find("join") or t:find("current match") or t:find("adventure is in progress") or t:find("beitreten") or t:find("spiel beitreten") or t:find("match beitreten")
+end
+local function visibleDeep(o)
+    if not o or not o.Parent then return false end
+    local cur=o
+    while cur and cur~=o.Parent and cur~=game do
+        if cur:IsA("GuiObject") and cur.Visible==false then return false end
+        cur=cur.Parent
+    end
+    return true
+end
+local function centerPos(gui)
+    local p=gui.AbsolutePosition
+    local s=gui.AbsoluteSize
+    return Vector2.new(p.X+s.X/2,p.Y+s.Y/2)
+end
+local function scoreButton(btn)
+    if not btn or not btn.Parent then return -1 end
+    if not visibleDeep(btn) then return -1 end
+    local score=0
+    if btn:IsA("TextButton") then
+        score=score+2
+        if isJoinText(btn.Text) then score=score+6 end
+    elseif btn:IsA("ImageButton") then
+        score=score+1
+    end
+    local lab=btn:FindFirstChildWhichIsA("TextLabel",true)
+    if lab and isJoinText(lab.Text) then score=score+5 end
+    if string.lower(btn.Name)=="joinbtn" then score=score+5 end
+    return score
+end
 local function joinHeaderVisible()
-    local pg=LP:FindFirstChild("PlayerGui"); if not pg then return false end
-    if cachedJoinLabel and cachedJoinLabel.Parent and cachedJoinLabel.Visible then return true end
-    local lbl=nil
-    local s1=pg:FindFirstChild("ScreenJoinGame",true)
-    if s1 then lbl=s1:FindFirstChild("Title",true) end
-    if not lbl then
-        for _,d in ipairs(pg:GetDescendants()) do
-            if d:IsA("TextLabel") then
-                local t=string.lower(d.Text or "")
-                if t:find("adventure is in progress") or t:find("join current match") then lbl=d break end
+    local pg=Players.LocalPlayer:FindFirstChild("PlayerGui"); if not pg then return false end
+    if cachedJoinLabel and cachedJoinLabel.Parent and visibleDeep(cachedJoinLabel) then return true end
+    local best=nil
+    for _,d in ipairs(pg:GetDescendants()) do
+        if d:IsA("TextLabel") and visibleDeep(d) and isJoinText(d.Text) then
+            best=d
+            break
+        end
+    end
+    cachedJoinLabel=best
+    return best~=nil
+end
+local function findJoinButtonSmart()
+    local pg=Players.LocalPlayer:FindFirstChild("PlayerGui"); if not pg then return nil end
+    local bestBtn=nil
+    local bestScore=-1
+    for _,d in ipairs(pg:GetDescendants()) do
+        if (d:IsA("TextButton") or d:IsA("ImageButton")) and visibleDeep(d) then
+            local sc=scoreButton(d)
+            if sc>bestScore then
+                bestScore=sc
+                bestBtn=d
             end
         end
     end
-    cachedJoinLabel=lbl
-    return lbl~=nil and lbl.Visible
+    if not bestBtn then return nil end
+    return bestBtn
 end
-
-local function findJoinButton()
-    local pg=LP:FindFirstChild("PlayerGui"); if not pg then return nil end
-    local b=nil
-    local s1=pg:FindFirstChild("ScreenJoinGame",true)
-    if s1 then b=s1:FindFirstChild("JoinBtn",true) end
-    if not b then
-        for _,d in ipairs(pg:GetDescendants()) do
-            if (d:IsA("TextButton") or d:IsA("ImageButton")) and d.Visible then
-                local t=""
-                if d:IsA("TextButton") then t=d.Text or "" end
-                local l=d:FindFirstChildWhichIsA("TextLabel"); if l and #l.Text>#t then t=l.Text end
-                t=string.lower(t or "")
-                local n=string.lower(d.Name or "")
-                if n=="joinbtn" or t:find("join") then b=d break end
-            end
-        end
+local function fires(btn,ev)
+    if not btn then return end
+    if firesignal then
+        pcall(function() firesignal(btn[ev],btn) end)
     end
-    return b
 end
-
 local function robustClick(btn)
-    if not btn or not btn.Parent or not btn.Visible then return end
-    local pos=btn.AbsolutePosition+btn.AbsoluteSize/2
-    local vim=game:GetService("VirtualInputManager")
+    if not btn or not btn.Parent then return end
+    local pos=centerPos(btn)
     pcall(function() btn:Activate() end)
-    pcall(function() if firesignal then firesignal(btn.MouseButton1Down) end end)
-    task.wait(0.01)
-    pcall(function() if firesignal then firesignal(btn.MouseButton1Up) end end)
-    pcall(function() if firesignal then firesignal(btn.MouseButton1Click) end end)
-    pcall(function() vim:SendMouseButtonEvent(pos.X,pos.Y,0,true,game,0) end)
-    task.wait(0.02)
-    pcall(function() vim:SendMouseButtonEvent(pos.X,pos.Y,0,false,game,0) end)
+    fires(btn,"MouseButton1Down")
+    fires(btn,"Activated")
+    VirtualInputManager:SendMouseButtonEvent(pos.X,pos.Y,0,true,game,0)
+    task.wait(0.03)
+    fires(btn,"MouseButton1Up")
+    fires(btn,"MouseButton1Click")
+    VirtualInputManager:SendMouseButtonEvent(pos.X,pos.Y,0,false,game,0)
 end
-
+local function buttonIsTopMostAtCenter(btn)
+    if not btn or not btn.Parent then return false end
+    local pos=centerPos(btn)
+    local arr=GuiService:GetGuiObjectsAtPosition(pos.X,pos.Y)
+    if not arr or #arr==0 then return true end
+    for _,o in ipairs(arr) do
+        if o==btn or o:IsDescendantOf(btn) then return true end
+        if o.Active and o.Visible then
+            return o==btn
+        end
+    end
+    return false
+end
 local function clickJoinButton()
     if not autoJoin then return end
-    if time()<nextScanAt then
-        if cachedJoinBtn and cachedJoinBtn.Parent and cachedJoinBtn.Visible and joinHeaderVisible() then
+    local t=time()
+    if t<joinDebounceUntil then return end
+    if t<nextScanAt then
+        if cachedJoinBtn and cachedJoinBtn.Parent and visibleDeep(cachedJoinBtn) and joinHeaderVisible() then
             local sig=tostring(cachedJoinBtn:GetDebugId())..":"..tostring(cachedJoinBtn.AbsolutePosition)..":"..tostring(cachedJoinBtn.AbsoluteSize)
-            if sig~=lastJoinSignature then
+            if sig~=lastJoinSignature or not buttonIsTopMostAtCenter(cachedJoinBtn) then
                 lastJoinSignature=sig
                 robustClick(cachedJoinBtn)
+                joinDebounceUntil=t+0.6
             end
         end
         return
     end
-    nextScanAt=time()+1.2
+    nextScanAt=t+1.0
     if not joinHeaderVisible() then return end
-    cachedJoinBtn=findJoinButton()
-    if cachedJoinBtn and cachedJoinBtn.Visible then
+    cachedJoinBtn=findJoinButtonSmart()
+    if cachedJoinBtn and visibleDeep(cachedJoinBtn) then
         local sig=tostring(cachedJoinBtn:GetDebugId())..":"..tostring(cachedJoinBtn.AbsolutePosition)..":"..tostring(cachedJoinBtn.AbsoluteSize)
-        if sig~=lastJoinSignature then
+        if sig~=lastJoinSignature or not buttonIsTopMostAtCenter(cachedJoinBtn) then
             lastJoinSignature=sig
             robustClick(cachedJoinBtn)
+            joinDebounceUntil=time()+0.6
         end
     end
 end
@@ -624,17 +677,17 @@ end})
 TabAuto:CreateSection("Events")
 TabAuto:CreateToggle({Name="Auto-Collect Pumpkins",CurrentValue=false,Flag="AutoPumpkins",Callback=function(s) autoPumpkins=s end})
 TabAuto:CreateToggle({Name="Auto-Collect GiftBoxes",CurrentValue=false,Flag="AutoGifts",Callback=function(s) autoGifts=s end})
-TabAuto:CreateToggle({Name="Auto-Join",CurrentValue=false,Flag="AutoJoin",Callback=function(s) autoJoin=s if not s then lastJoinSignature=nil cachedJoinBtn=nil cachedJoinLabel=nil nextScanAt=0 end end})
+TabAuto:CreateToggle({Name="Auto-Join",CurrentValue=false,Flag="AutoJoin",Callback=function(s) autoJoin=s if not s then lastJoinSignature=nil cachedJoinBtn=nil cachedJoinLabel=nil nextScanAt=0 joinDebounceUntil=0 end end})
 
 TabAuto:CreateSection("Farm")
 TabAuto:CreateToggle({Name="Auto-Farm (Key -> Door)",CurrentValue=false,Flag="AutoFarm",Callback=function(s) autoFarm=s end})
 
-local PRE_DOOR_DELAY=1.0
-local POST_DOOR_DELAY=1.0
+local PRE_DOOR_DELAY=1.2
+local POST_DOOR_DELAY=0.6
 
 local function spamNearbyPrompts(radius,pressTimes)
-    radius=radius or 12
-    pressTimes=pressTimes or 3
+    radius=radius or 14
+    pressTimes=pressTimes or 4
     local r=hrp(); if not r then return end
     local root=r.Position
     local near={}
@@ -648,14 +701,14 @@ local function spamNearbyPrompts(radius,pressTimes)
         end
     end
     for i=1,pressTimes do
-        for _,pp in ipairs(near) do pcall(function() firePrompt(pp,0.1) end) end
+        for _,pp in ipairs(near) do pcall(function() firePrompt(pp,0.05) end) end
         pressE(1,0)
-        task.wait(0.08)
+        task.wait(0.1)
     end
 end
 
 local function holdDoorPrompt(entry,seconds)
-    seconds=seconds or 4
+    seconds=seconds or 1.2
     local pr=entry and entry.prompt
     local part=entry and entry.part
     if not (pr and part) then return end
@@ -678,13 +731,14 @@ local function doAutoFarmStep()
     local key=nearestKey()
     if key and key.part then
         tp(key.part.CFrame+Vector3.new(0,3,0))
-        task.wait(1.0)
-        spamNearbyPrompts(12,3)
-        pressE(5,0)
+        task.wait(1.2)
+        spamNearbyPrompts(14,5)
+        pressE(6,0)
+        task.wait(0.25)
     end
     local door=anyDoor()
     if door and door.part and door.prompt then
-        holdDoorPrompt(door,4)
+        holdDoorPrompt(door,1.2)
     end
     farmState.busy=false
     if autoFarm and not safetyActive then task.defer(doAutoFarmStep) end
@@ -696,6 +750,17 @@ local pumpkinTicker=0
 local giftsTicker=0
 local joinTicker=0
 local safetyTicker=0
+
+local instantOpenDebounce={}
+local function isDoorPromptInstance(p)
+    if not p then return false end
+    local n=p
+    while n and n~=Workspace do
+        if n:IsA("Model") and isDoorModel(n) then return true end
+        n=n.Parent
+    end
+    return false
+end
 
 RunService.Heartbeat:Connect(function(dt)
     espTicker+=dt
@@ -724,12 +789,12 @@ RunService.Heartbeat:Connect(function(dt)
         end
     end
 
-    if autoTicker>0.6 then
+    if autoTicker>0.7 then
         autoTicker=0
         if autoFarm then doAutoFarmStep() end
     end
 
-    if pumpkinTicker>0.8 then
+    if pumpkinTicker>0.9 then
         pumpkinTicker=0
         if autoPumpkins then collectPumpkinsOnce() end
     end
@@ -742,6 +807,29 @@ RunService.Heartbeat:Connect(function(dt)
     if joinTicker>0.5 then
         joinTicker=0
         if autoJoin then clickJoinButton() end
+    end
+
+    local r=hrp()
+    if r then
+        for _,pp in ipairs(Workspace:GetDescendants()) do
+            if pp:IsA("ProximityPrompt") and pp.Enabled and isDoorPromptInstance(pp) then
+                local part=nearestBasePartFrom(pp)
+                if part then
+                    local d=(part.Position-r.Position).Magnitude
+                    if d<=9 then
+                        local key=pp:GetDebugId()
+                        if not instantOpenDebounce[key] or (time()-instantOpenDebounce[key])>1.0 then
+                            if pp.HoldDuration and pp.HoldDuration>0 then
+                                firePrompt(pp,1.1)
+                            else
+                                pressE(1,0.2)
+                            end
+                            instantOpenDebounce[key]=time()
+                        end
+                    end
+                end
+            end
+        end
     end
 end)
 
