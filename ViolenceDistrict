@@ -554,121 +554,109 @@ TabVisual:CreateToggle({
 TabVisual:CreateSlider({Name="Time Of Day",Range={0,24},Increment=1,CurrentValue=Lighting.ClockTime,Flag="TimeOfDay",Callback=function(v) desiredClockTime=v Lighting.ClockTime=v bindTimeLock() end})
 
 local nfActive=false
-local nfStore={lighting={},inst=setmetatable({},{__mode="k"}),conns={},tick=nil}
-local nfNameTokens={"smoke","mist","fog","haze","smog","steam","cloud","lake"}
-local nfStrictNames={["Smoke"]=true,["LakeMist"]=true,["Chromatic Water Fog"]=true,["Cursed Energy Smoke"]=true,["Firm Smoke"]=true,["Foggy Wind"]=true}
-local nfQueue, nfQueued, nfProcessed = {}, setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
+local nfStore={conns={},tick=nil}
+local nfQueue, nfQueued = {}, setmetatable({}, {__mode="k"})
 
-local function nfSave(inst, props)
-    if not inst then return end
-    nfStore.inst[inst] = nfStore.inst[inst] or {}
-    for _,p in ipairs(props) do
-        if nfStore.inst[inst][p]==nil then
-            local ok,v=pcall(function() return inst[p] end)
-            if ok then nfStore.inst[inst][p]=v end
+local function nfNameHasFog(inst)
+    local n = inst and inst.Name or ""
+    n = string.lower(n)
+    return string.find(n,"fog",1,true) ~= nil
+end
+
+local function nfHardNuke(o)
+    pcall(function()
+        for _,d in ipairs(o:GetDescendants()) do
+            if d:IsA("ParticleEmitter") then pcall(function() d.Enabled=false d.Rate=0 end) end
         end
-    end
+        o:Destroy()
+    end)
 end
-local function nfRestoreAll()
-    for inst,props in pairs(nfStore.inst) do
-        if inst and alive(inst) then
-            for k,v in pairs(props) do pcall(function() inst[k]=v end) end
-        end
-    end
-    nfStore.inst=setmetatable({},{__mode="k"})
-    if nfStore.lighting then for k,v in pairs(nfStore.lighting) do pcall(function() Lighting[k]=v end) end end
-    for _,c in ipairs(nfStore.conns) do pcall(function() c:Disconnect() end) end
-    nfStore.conns={}
-    if nfStore.tick then nfStore.tick:Disconnect() nfStore.tick=nil end
-end
-local function nfMatchesName(n)
-    local s=string.lower(n or "")
-    if nfStrictNames[n] then return true end
-    for _,t in ipairs(nfNameTokens) do if string.find(s,t,1,true) then return true end end
-    return false
-end
+
 local function nfIsCandidate(inst)
     if not inst or not inst.Parent then return false end
+    if nfNameHasFog(inst) then return true end
     if inst:IsA("Clouds") or inst:IsA("Atmosphere") then return true end
-    if inst:IsA("ParticleEmitter") and nfMatchesName(inst.Name) then return true end
+    if inst:IsA("ParticleEmitter") then return true end
     if inst:IsA("SunRaysEffect") or inst:IsA("BloomEffect") or inst:IsA("DepthOfFieldEffect") then return true end
-    if inst:IsA("Folder") and nfMatchesName(inst.Name) then return true end
-    if inst:IsA("Part") and nfMatchesName(inst.Name) then return true end
     return false
 end
-local function nfDisableParticle(pe) nfSave(pe,{"Enabled","Rate"}) pcall(function() pe.Enabled=false pe.Rate=0 end) end
-local function nfDisableClouds(c) nfSave(c,{"Enabled","Cover","Density","Color"}) pcall(function() c.Enabled=false end) end
-local function nfFlattenAtmosphere(a) nfSave(a,{"Density","Haze","Glare"}) pcall(function() a.Density=0 a.Haze=0 a.Glare=0 end) end
-local function nfToneEffects(e)
-    if e:IsA("SunRaysEffect") then nfSave(e,{"Enabled"}) pcall(function() e.Enabled=false end)
-    elseif e:IsA("BloomEffect") then nfSave(e,{"Enabled"}) pcall(function() e.Enabled=false end)
-    elseif e:IsA("DepthOfFieldEffect") then nfSave(e,{"Enabled"}) pcall(function() e.Enabled=false end)
-    end
-end
+
 local function nfHandle(inst)
-    if nfProcessed[inst] then return end
-    nfProcessed[inst]=true
-    if inst:IsA("Clouds") then nfDisableClouds(inst) return end
-    if inst:IsA("Atmosphere") then nfFlattenAtmosphere(inst) return end
-    if inst:IsA("ParticleEmitter") then nfDisableParticle(inst) return end
-    if inst:IsA("SunRaysEffect") or inst:IsA("BloomEffect") then nfToneEffects(inst) return end
-    if inst:IsA("Folder") or inst:IsA("Part") then
-        for _,d in ipairs(inst:GetDescendants()) do
-            if d:IsA("ParticleEmitter") and nfMatchesName(d.Name) then nfDisableParticle(d) end
-        end
+    if not inst or not inst.Parent then return end
+    if nfNameHasFog(inst) then
+        nfHardNuke(inst)
+        return
+    end
+    if inst:IsA("Clouds") or inst:IsA("Atmosphere") then
+        nfHardNuke(inst)
+        return
+    end
+    if inst:IsA("ParticleEmitter") then
+        nfHardNuke(inst)
+        return
+    end
+    if inst:IsA("SunRaysEffect") or inst:IsA("BloomEffect") or inst:IsA("DepthOfFieldEffect") then
+        nfHardNuke(inst)
+        return
+    end
+    for _,d in ipairs(inst:GetDescendants()) do
+        if nfNameHasFog(d) or d:IsA("ParticleEmitter") then nfHardNuke(d) end
     end
 end
+
 local function nfEnqueueOne(inst)
     if not nfActive or not nfIsCandidate(inst) or nfQueued[inst] then return end
     nfQueued[inst]=true
     table.insert(nfQueue,inst)
 end
-local function nfEnqueueTree(root)
-    if not root then return end
-    for _,d in ipairs(root:GetDescendants()) do nfEnqueueOne(d) end
-end
-local function nfApplyLighting()
-    nfStore.lighting={FogStart=Lighting.FogStart,FogEnd=Lighting.FogEnd,FogColor=Lighting.FogColor}
-    pcall(function() Lighting.FogStart=1e9 Lighting.FogEnd=1e9 end)
-end
+
 local function nfBindWatchers()
     local c1 = Workspace.DescendantAdded:Connect(function(d) nfEnqueueOne(d) end)
     local c2 = Lighting.DescendantAdded:Connect(function(d) nfEnqueueOne(d) end)
     local c3 = ReplicatedStorage.DescendantAdded:Connect(function(d) nfEnqueueOne(d) end)
-    local c4 = Workspace.ChildAdded:Connect(function(ch)
-        if ch.Name=="Map" or ch.Name=="Map1" or ch.Name=="Terrain" then
-            task.delay(0.4, function() nfEnqueueTree(ch) end)
-        end
-    end)
     table.insert(nfStore.conns, c1)
     table.insert(nfStore.conns, c2)
     table.insert(nfStore.conns, c3)
-    table.insert(nfStore.conns, c4)
 end
+
 local function nfStartQueue()
     if nfStore.tick then nfStore.tick:Disconnect() nfStore.tick=nil end
     nfStore.tick = RunService.Heartbeat:Connect(function()
         if not nfActive then return end
         local t0 = os.clock()
-        while #nfQueue>0 and (os.clock()-t0) < 0.003 do
+        while #nfQueue>0 and (os.clock()-t0) < 0.004 do
             local inst = table.remove(nfQueue,1)
             if inst and inst.Parent then nfHandle(inst) end
         end
     end)
 end
+
+local function nfInitialSweep()
+    for _,root in ipairs({Workspace, Lighting, ReplicatedStorage}) do
+        for _,d in ipairs(root:GetDescendants()) do
+            if nfIsCandidate(d) then nfHandle(d) end
+        end
+    end
+end
+
 local function nfEnable()
     if nfActive then return end
     nfActive = true
-    nfApplyLighting()
+    nfInitialSweep()
     nfBindWatchers()
     nfStartQueue()
 end
+
 local function nfDisable()
     if not nfActive then return end
     nfActive=false
-    nfRestoreAll()
+    if nfStore.tick then pcall(function() nfStore.tick:Disconnect() end) nfStore.tick=nil end
+    for _,c in ipairs(nfStore.conns) do pcall(function() c:Disconnect() end) end
+    nfStore.conns={}
+    nfQueue, nfQueued = {}, setmetatable({}, {__mode="k"})
 end
-TabVisual:CreateToggle({Name="No Fog",CurrentValue=false,Flag="NoFog",Callback=function(s) if s then nfEnable() else nfDisable() end end})
+
+TabVisual:CreateToggle({Name="No Fog (Purge by Name)",CurrentValue=false,Flag="NoFog",Callback=function(s) if s then nfEnable() else nfDisable() end end})
 
 local nsActive=false
 local nsStore={lighting={},parts=setmetatable({},{__mode="k"}),conns={}}
@@ -1421,4 +1409,4 @@ task.defer(function()
     end
 end)
 Rayfield:Notify({Title="Violence District",Content="Loaded",Duration=6})
-Rayfield:Notify({Title="Info",Content="ESP fixed • Always-on-through-walls Chams & Nametags • Killer Speed-Auto-Off",Duration=6})
+Rayfield:Notify({Title="Info",Content="Fog purge by name enabled • ESP stable • Killer Speed-Auto-Off",Duration=6})
