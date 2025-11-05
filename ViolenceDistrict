@@ -20,6 +20,14 @@ local function clamp(n,lo,hi) if n<lo then return lo elseif n>hi then return hi 
 local function now() return os.clock() end
 local function dist(a,b) return (a-b).Magnitude end
 
+local function viewerPos()
+    local hrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if hrp and alive(hrp) then return hrp.Position end
+    local cam = Workspace.CurrentCamera
+    if cam then return cam.CFrame.Position end
+    return Vector3.new(0,0,0)
+end
+
 local function firstBasePart(inst)
     if not alive(inst) then return nil end
     if inst:IsA("BasePart") then return inst end
@@ -55,7 +63,13 @@ local function makeBillboard(text, color3)
     return g
 end
 
-local function ensureBoxESP(part, name, color)
+local espThroughWalls = true
+local espMaxDistance = 300
+local worldMaxDistance = 400
+local worldUpdateInterval = 0.35
+local worldBatchPerTick = 120
+
+local function ensureBoxESP(part, name, color, through)
     if not validPart(part) then return end
     local a = part:FindFirstChild(name)
     if not a then
@@ -64,8 +78,8 @@ local function ensureBoxESP(part, name, color)
             b.Name = name
             b.Adornee = part
             b.ZIndex = 10
-            b.AlwaysOnTop = true
-            b.Transparency = 0.5
+            b.AlwaysOnTop = through and true or false
+            b.Transparency = 0.55
             b.Size = part.Size + Vector3.new(0.2,0.2,0.2)
             b.Color3 = color
             b.Parent = part
@@ -73,9 +87,12 @@ local function ensureBoxESP(part, name, color)
         end)
         if ok then a = obj end
     else
-        a.Color3 = color
-        a.Size = part.Size + Vector3.new(0.2,0.2,0.2)
+        if a.AlwaysOnTop ~= (through and true or false) then a.AlwaysOnTop = (through and true or false) end
+        if a.Color3 ~= color then a.Color3 = color end
+        local target = part.Size + Vector3.new(0.2,0.2,0.2)
+        if a.Size.X ~= target.X or a.Size.Y ~= target.Y or a.Size.Z ~= target.Z then a.Size = target end
     end
+    return a
 end
 
 local function clearChild(o, n)
@@ -85,7 +102,7 @@ local function clearChild(o, n)
     end
 end
 
-local function ensureHighlight(model, fill)
+local function ensureHighlight(model, fill, through)
     if not (model and model:IsA("Model") and alive(model)) then return end
     local hl = model:FindFirstChild("VD_HL")
     if not hl then
@@ -93,16 +110,18 @@ local function ensureHighlight(model, fill)
             local h = Instance.new("Highlight")
             h.Name = "VD_HL"
             h.Adornee = model
-            h.FillTransparency = 0.5
-            h.OutlineTransparency = 0
+            h.FillTransparency = 0.65
+            h.OutlineTransparency = 0.05
             h.Parent = model
             return h
         end)
         if ok then hl = obj else return end
     end
-    hl.FillColor = fill
-    hl.OutlineColor = fill
-    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    if hl.FillColor ~= fill then hl.FillColor = fill end
+    if hl.OutlineColor ~= fill then hl.OutlineColor = fill end
+    local mode = through and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+    if hl.DepthMode ~= mode then hl.DepthMode = mode end
+    return hl
 end
 
 local function clearHighlight(model)
@@ -185,9 +204,14 @@ local function applyPlayerESP(p)
     local c = p.Character
     if not (c and alive(c)) then return end
     local col = (getRole(p)=="Killer") and currentKillerColor() or survivorColor
-
-    if playerESPEnabled then
-        if c:IsDescendantOf(Workspace) then ensureHighlight(c, col) end
+    local vp = viewerPos()
+    local hrp = c:FindFirstChild("HumanoidRootPart")
+    local tooFar = true
+    if hrp and validPart(hrp) then
+        tooFar = dist(vp, hrp.Position) > espMaxDistance
+    end
+    if playerESPEnabled and not tooFar then
+        if c:IsDescendantOf(Workspace) then ensureHighlight(c, col, espThroughWalls) end
         local head = c:FindFirstChild("Head")
         if nametagsEnabled and validPart(head) then
             local tag = head:FindFirstChild("VD_Tag") or makeBillboard(p.Name, col)
@@ -196,7 +220,7 @@ local function applyPlayerESP(p)
             local l = tag:FindFirstChild("Label")
             if l then
                 if getRole(p)=="Killer" then l.Text = p.Name.." ["..tostring(killerTypeName).."]" else l.Text = p.Name end
-                l.TextColor3 = col
+                if l.TextColor3 ~= col then l.TextColor3 = col end
             end
         else
             local t = head and head:FindFirstChild("VD_Tag")
@@ -232,6 +256,8 @@ end
 TabESP:CreateSection("Players")
 TabESP:CreateToggle({Name="Player ESP (Chams)",CurrentValue=false,Flag="PlayerESP",Callback=function(s) playerESPEnabled=s for _,pl in ipairs(Players:GetPlayers()) do if pl~=LP then applyPlayerESP(pl) end end end})
 TabESP:CreateToggle({Name="Nametags",CurrentValue=false,Flag="Nametags",Callback=function(s) nametagsEnabled=s for _,pl in ipairs(Players:GetPlayers()) do if pl~=LP then applyPlayerESP(pl) end end end})
+TabESP:CreateToggle({Name="Through Walls",CurrentValue=true,Flag="ESP_Walls",Callback=function(s) espThroughWalls=s for _,pl in ipairs(Players:GetPlayers()) do if pl~=LP then applyPlayerESP(pl) end end end})
+TabESP:CreateSlider({Name="ESP Distance",Range={50,1000},Increment=10,CurrentValue=espMaxDistance,Flag="ESP_Dist",Callback=function(v) espMaxDistance=v for _,pl in ipairs(Players:GetPlayers()) do if pl~=LP then applyPlayerESP(pl) end end end})
 TabESP:CreateColorPicker({Name="Survivor Color",Color=survivorColor,Flag="SurvivorCol",Callback=function(c) survivorColor=c for _,pl in ipairs(Players:GetPlayers()) do if pl~=LP then applyPlayerESP(pl) end end end})
 TabESP:CreateColorPicker({Name="Killer Color",Color=killerBaseColor,Flag="KillerCol",Callback=function(c) killerBaseColor=c killerColors.Killer=c for _,pl in ipairs(Players:GetPlayers()) do if pl~=LP then applyPlayerESP(pl) end end end})
 
@@ -323,7 +349,7 @@ local function ensureWorldEntry(cat, model)
     if cat=="Palletwrong" and isPalletGone(model) then return end
     local rep = pickRep(model, cat)
     if not validPart(rep) then return end
-    worldReg[cat][model] = {part = rep}
+    worldReg[cat][model] = {part = rep, lastText=nil, lastColor=nil, lastSize=nil, hasBox=false}
 end
 local function removeWorldEntry(cat, model)
     local e = worldReg[cat][model]
@@ -405,16 +431,19 @@ refreshRoots()
 Workspace.ChildAdded:Connect(function(ch) if ch.Name=="Map" or ch.Name=="Map1" then attachRoot(ch) end end)
 
 local worldLoopThread=nil
+local worldTickDelay = worldUpdateInterval
 local function anyWorldEnabled() for _,v in pairs(worldEnabled) do if v then return true end end return false end
 local function startWorldLoop()
     if worldLoopThread then return end
     worldLoopThread = task.spawn(function()
         while anyWorldEnabled() do
+            local processed = 0
+            local vp = viewerPos()
             for cat,models in pairs(worldReg) do
                 if worldEnabled[cat] then
                     local col, tagName, textName = worldColors[cat], "VD_"..cat, "VD_Text_"..cat
-                    local n = 0
                     for model,entry in pairs(models) do
+                        if processed >= worldBatchPerTick then break end
                         if cat=="Palletwrong" and isPalletGone(model) then
                             removeWorldEntry(cat, model)
                         else
@@ -424,33 +453,57 @@ local function startWorldLoop()
                                     entry.part = pickRep(model, cat); part = entry.part
                                 end
                                 if validPart(part) then
-                                    ensureBoxESP(part, tagName, col)
-                                    local bb = part:FindFirstChild(textName)
-                                    if not bb then
-                                        local newbb = makeBillboard((cat=="Palletwrong" and "Pallet") or cat, col)
-                                        newbb.Name = textName
-                                        newbb.Parent = part
-                                        bb = newbb
-                                    end
-                                    local lbl = bb:FindFirstChild("Label")
-                                    if lbl then
-                                        if cat=="Generator" then local txt,lblCol=genLabelData(model) lbl.Text=txt lbl.TextColor3=lblCol
-                                        elseif cat=="Palletwrong" then lbl.Text=labelForPallet(model) lbl.TextColor3=col
-                                        elseif cat=="Window" then lbl.Text=labelForWindow(model) lbl.TextColor3=col
-                                        elseif cat=="Pumpkin" then lbl.Text="Pumpkin" lbl.TextColor3=col
-                                        else lbl.Text=cat lbl.TextColor3=col end
+                                    local far = dist(vp, part.Position) > worldMaxDistance
+                                    if far then
+                                        if entry.hasBox then
+                                            clearChild(part, tagName); clearChild(part, textName)
+                                            entry.hasBox=false
+                                        end
+                                    else
+                                        ensureBoxESP(part, tagName, col, espThroughWalls); entry.hasBox=true
+                                        local bb = part:FindFirstChild(textName)
+                                        if not bb then
+                                            local newbb = makeBillboard((cat=="Palletwrong" and "Pallet") or cat, col)
+                                            newbb.Name = textName
+                                            newbb.Parent = part
+                                            bb = newbb
+                                        end
+                                        local lbl = bb:FindFirstChild("Label")
+                                        if lbl then
+                                            if cat=="Generator" then
+                                                local txt,lblCol=genLabelData(model)
+                                                if entry.lastText~=txt then lbl.Text=txt entry.lastText=txt end
+                                                if not entry.lastColor or entry.lastColor.R~=lblCol.R or entry.lastColor.G~=lblCol.G or entry.lastColor.B~=lblCol.B then
+                                                    lbl.TextColor3=lblCol
+                                                    entry.lastColor=lblCol
+                                                end
+                                            elseif cat=="Palletwrong" then
+                                                local t2=labelForPallet(model)
+                                                if entry.lastText~=t2 then lbl.Text=t2 entry.lastText=t2 end
+                                                if lbl.TextColor3~=col then lbl.TextColor3=col end
+                                            elseif cat=="Window" then
+                                                local t2=labelForWindow(model)
+                                                if entry.lastText~=t2 then lbl.Text=t2 entry.lastText=t2 end
+                                                if lbl.TextColor3~=col then lbl.TextColor3=col end
+                                            elseif cat=="Pumpkin" then
+                                                if entry.lastText~="Pumpkin" then lbl.Text="Pumpkin" entry.lastText="Pumpkin" end
+                                                if lbl.TextColor3~=col then lbl.TextColor3=col end
+                                            else
+                                                if entry.lastText~=cat then lbl.Text=cat entry.lastText=cat end
+                                                if lbl.TextColor3~=col then lbl.TextColor3=col end
+                                            end
+                                        end
                                     end
                                 end
                             else
                                 removeWorldEntry(cat, model)
                             end
                         end
-                        n = n + 1
-                        if n % 60 == 0 then task.wait() end
+                        processed = processed + 1
                     end
                 end
             end
-            task.wait(0.25)
+            task.wait(worldTickDelay)
         end
         worldLoopThread=nil
     end)
@@ -463,6 +516,7 @@ local function setWorldToggle(cat, state)
         for _,entry in pairs(worldReg[cat]) do
             if entry and entry.part then
                 clearChild(entry.part,"VD_"..cat); clearChild(entry.part,"VD_Text_"..cat)
+                entry.hasBox=false
             end
         end
     end
@@ -475,6 +529,10 @@ TabWorld:CreateToggle({Name="Gates",CurrentValue=false,Flag="Gate",Callback=func
 TabWorld:CreateToggle({Name="Windows (Usability)",CurrentValue=false,Flag="Window",Callback=function(s) setWorldToggle("Window", s) end})
 TabWorld:CreateToggle({Name="Pallets (Usability)",CurrentValue=false,Flag="Pallet",Callback=function(s) setWorldToggle("Palletwrong", s) end})
 TabWorld:CreateToggle({Name="Pumpkins",CurrentValue=false,Flag="Pumpkin",Callback=function(s) setWorldToggle("Pumpkin", s) end})
+TabWorld:CreateSection("Performance")
+TabWorld:CreateSlider({Name="World ESP Distance",Range={100,1500},Increment=25,CurrentValue=worldMaxDistance,Flag="WorldDist",Callback=function(v) worldMaxDistance=v end})
+TabWorld:CreateSlider({Name="World ESP Interval (ms)",Range={100,1000},Increment=25,CurrentValue=math.floor(worldUpdateInterval*1000),Flag="WorldInt",Callback=function(v) worldUpdateInterval=v/1000 worldTickDelay=worldUpdateInterval end})
+TabWorld:CreateSlider({Name="World Batch/Step",Range={40,400},Increment=10,CurrentValue=worldBatchPerTick,Flag="WorldBatch",Callback=function(v) worldBatchPerTick=v end})
 TabWorld:CreateSection("Colors")
 TabWorld:CreateColorPicker({Name="Generators",Color=worldColors.Generator,Flag="GenCol",Callback=function(c) worldColors.Generator=c end})
 TabWorld:CreateColorPicker({Name="Hooks",Color=worldColors.Hook,Flag="HookCol",Callback=function(c) worldColors.Hook=c end})
@@ -818,14 +876,12 @@ end
 
 local function bindHumanoid(h)
     speedHumanoid = h
-
     if wsConn then wsConn:Disconnect() end
     wsConn = h:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
         if speedEnforced and canEnforce() and h.WalkSpeed ~= speedCurrent then
             setWalkSpeed(h, speedCurrent)
         end
     end)
-
     if stConn then stConn:Disconnect() end
     stConn = h.StateChanged:Connect(function(_, new)
         if new==Enum.HumanoidStateType.Ragdoll
@@ -838,15 +894,12 @@ local function bindHumanoid(h)
             task.delay(1.0,function() speedPaused=false end)
         end
     end)
-
     if pfConn then pfConn:Disconnect() end
     pfConn = h:GetPropertyChangedSignal("PlatformStand"):Connect(function() speedPaused = h.PlatformStand end)
-
     if anConn then anConn:Disconnect() end
     anConn = h.AncestryChanged:Connect(function(_, parent)
         if not parent then disconnectAll() end
     end)
-
     if speedEnforced then
         if not speedTickConn then
             speedLastTick = 0
@@ -919,7 +972,15 @@ local function connectRemote(inst)
     end
 
     if underMechanics then
-        if inst.Name=="PalletStun" then hook(function() speedStunUntil = math.max(speedStunUntil, now()+3.5) end)
+        if inst.Name=="PalletStun" then hook(function()
+            speedStunUntil = math.max(speedStunUntil, now()+3.5)
+            if getRole(LP)=="Killer" and speedEnforced then
+                speedEnforced=false
+                disconnectAll()
+                applyDisabledState()
+                Rayfield:Notify({Title="Speed",Content="Speed Lock disabled due to Killer pallet stun",Duration=4})
+            end
+        end)
         elseif inst.Name=="Slow" then hook(function() speedSlowUntil = math.max(speedSlowUntil, now()+3.0) end)
         elseif inst.Name=="Slowserver" and isRE then
             hook(function(_,_,dur)
@@ -985,11 +1046,16 @@ if LP.Character then onCharacterAdded(LP.Character) end
 LP.CharacterAdded:Connect(onCharacterAdded)
 
 TabPlayer:CreateSection("Movement")
-TabPlayer:CreateToggle({
+local SpeedLockToggle = TabPlayer:CreateToggle({
     Name="Speed Lock",
     CurrentValue=false,
     Flag="SpeedLock",
     Callback=function(state)
+        if state and getRole(LP)=="Killer" then
+            Rayfield:Notify({Title="Speed",Content="Disabled for Killer team",Duration=4})
+            pcall(function() SpeedLockToggle:Set(false) end)
+            return
+        end
         speedEnforced = state
         local h = speedHumanoid
         if not h or not h.Parent then return end
@@ -1009,6 +1075,16 @@ TabPlayer:CreateToggle({
 })
 TabPlayer:CreateSlider({Name="Walk Speed",Range={0,200},Increment=1,CurrentValue=16,Flag="WalkSpeed",Callback=function(v) speedCurrent=v if speedEnforced and canEnforce() then setWalkSpeed(speedHumanoid,speedCurrent) end end})
 TabPlayer:CreateButton({Name="Reset Speed",Callback=function() speedCurrent=canonicalDefault() if speedHumanoid and speedHumanoid.Parent then if speedEnforced and canEnforce() then setWalkSpeed(speedHumanoid,speedCurrent) else applyDisabledState() end end end})
+
+LP:GetPropertyChangedSignal("Team"):Connect(function()
+    if getRole(LP)=="Killer" and speedEnforced then
+        speedEnforced=false
+        disconnectAll()
+        applyDisabledState()
+        Rayfield:Notify({Title="Speed",Content="Speed Lock disabled for Killer team",Duration=4})
+        pcall(function() SpeedLockToggle:Set(false) end)
+    end
+end)
 
 local noclipEnabled, noclipConn, noclipTouched = false, nil, {}
 local function setNoclip(state)
@@ -1377,7 +1453,7 @@ do
             autoRepairEnabled = state
             Rayfield:Notify({
                 Title="Auto-Repair",
-                Content=state and "aktiviert" or "deaktiviert",
+                Content=state and "activated" or "deactivated",
                 Duration=4
             })
         end
@@ -1389,5 +1465,15 @@ do
     end)
 end
 Rayfield:LoadConfiguration()
+task.defer(function()
+    if getRole(LP)=="Killer" then
+        if speedEnforced then
+            speedEnforced=false
+            disconnectAll()
+            applyDisabledState()
+        end
+        pcall(function() SpeedLockToggle:Set(false) end)
+    end
+end)
 Rayfield:Notify({Title="Violence District",Content="Loaded",Duration=6})
-Rayfield:Notify({Title="Info",Content="Pallet ghost ESP fixed • Speed Lock stabilized • Pumpkin ESP added",Duration=6})
+Rayfield:Notify({Title="Info",Content="ESP optimized • Distance culling • Batch updates • Speed Lock auto-off for Killer",Duration=6})
