@@ -1,0 +1,1046 @@
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "Banana eats made by JLCFG",
+    LoadingTitle = "Banana eats made by JLCFG",
+    LoadingSubtitle = "",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "BananaEats_JLCFG",
+        FileName = "Config"
+    }
+})
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+local PlayerTab = Window:CreateTab("Player")
+PlayerTab:CreateSection("Movement")
+
+local targetSpeed = 16
+local noclipEnabled = false
+local originalCollide = {}
+local character = nil
+local humanoid = nil
+local noclipConn = nil
+
+local function applyWalkSpeed()
+    if humanoid and humanoid.WalkSpeed ~= targetSpeed then
+        humanoid.WalkSpeed = targetSpeed
+    end
+end
+
+local function onHumanoidSpeedChanged()
+    if humanoid and humanoid.WalkSpeed ~= targetSpeed then
+        humanoid.WalkSpeed = targetSpeed
+    end
+end
+
+local function setCharacter(c)
+    character = c
+    originalCollide = {}
+    if noclipConn then noclipConn:Disconnect() noclipConn = nil end
+    humanoid = c:FindFirstChildOfClass("Humanoid") or c:WaitForChild("Humanoid", 10)
+    if humanoid then
+        applyWalkSpeed()
+        humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(onHumanoidSpeedChanged)
+    end
+    if noclipEnabled then
+        for _, v in ipairs(c:GetDescendants()) do
+            if v:IsA("BasePart") then
+                if originalCollide[v] == nil then originalCollide[v] = v.CanCollide end
+                v.CanCollide = false
+            end
+        end
+        noclipConn = c.DescendantAdded:Connect(function(d)
+            if noclipEnabled and d:IsA("BasePart") then
+                if originalCollide[d] == nil then originalCollide[d] = d.CanCollide end
+                d.CanCollide = false
+            end
+        end)
+    end
+end
+
+setCharacter(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait())
+LocalPlayer.CharacterAdded:Connect(setCharacter)
+
+PlayerTab:CreateSlider({
+    Name = "Player Speed",
+    Range = {16, 200},
+    Increment = 1,
+    Suffix = "Speed",
+    CurrentValue = 16,
+    Flag = "PlayerSpeed",
+    Callback = function(v)
+        targetSpeed = v
+        applyWalkSpeed()
+    end
+})
+
+PlayerTab:CreateToggle({
+    Name = "NoClip",
+    CurrentValue = false,
+    Flag = "NoClip",
+    Callback = function(v)
+        noclipEnabled = v
+        if not character then return end
+        if v then
+            if noclipConn then noclipConn:Disconnect() noclipConn = nil end
+            for _, part in ipairs(character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    if originalCollide[part] == nil then originalCollide[part] = part.CanCollide end
+                    part.CanCollide = false
+                end
+            end
+            noclipConn = character.DescendantAdded:Connect(function(d)
+                if noclipEnabled and d:IsA("BasePart") then
+                    if originalCollide[d] == nil then originalCollide[d] = d.CanCollide end
+                    d.CanCollide = false
+                end
+            end)
+        else
+            if noclipConn then noclipConn:Disconnect() noclipConn = nil end
+            for part, state in pairs(originalCollide) do
+                if part and part.Parent then part.CanCollide = state end
+            end
+            table.clear(originalCollide)
+        end
+    end
+})
+
+local ESPTab = Window:CreateTab("ESP")
+ESPTab:CreateSection("Visuals")
+
+local espEnabled = true
+local showNames = true
+local showChams = true
+local showBoxes = true
+
+local killerColor = Color3.fromRGB(255, 70, 70)
+local survivorColor = Color3.fromRGB(70, 255, 120)
+local unknownColor = Color3.fromRGB(255, 255, 0)
+
+local function roleForPlayer(plr)
+    local tn = plr.Team and plr.Team.Name or ""
+    local s = string.lower(tn)
+    if string.find(s, "banana") or string.find(s, "killer") then return "Killer" end
+    if string.find(s, "survivor") then return "Survivor" end
+    local attr = plr:GetAttribute("Role")
+    if typeof(attr) == "string" then
+        local a = string.lower(attr)
+        if string.find(a, "banana") or string.find(a, "killer") then return "Killer" end
+        if string.find(a, "survivor") then return "Survivor" end
+    end
+    return nil
+end
+
+local function colorForRole(r)
+    if r == "Killer" then return killerColor end
+    if r == "Survivor" then return survivorColor end
+    return unknownColor
+end
+
+local function getGuiParent()
+    local ok, core = pcall(function() return game:GetService("CoreGui") end)
+    if ok and core then return core end
+    return LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local guiParent = getGuiParent()
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ESP_UI"
+screenGui.IgnoreGuiInset = true
+screenGui.ResetOnSpawn = false
+screenGui.Parent = guiParent
+
+local records = {}
+local bananaRecords = {}
+
+local function ensureSingleChild(parent, name)
+    local found = nil
+    for _, ch in ipairs(parent:GetChildren()) do
+        if ch.Name == name then
+            if not found then
+                found = ch
+            else
+                ch:Destroy()
+            end
+        end
+    end
+    return found
+end
+
+local function ensureHighlightOn(target, name)
+    local existing = ensureSingleChild(target, name or "ESP_Highlight")
+    local h = existing
+    if not h or not h:IsA("Highlight") then
+        if h then h:Destroy() end
+        h = Instance.new("Highlight")
+        h.Name = name or "ESP_Highlight"
+        h.FillTransparency = 0.3
+        h.OutlineTransparency = 0
+        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        h.Parent = target
+    end
+    h.Adornee = target
+    return h
+end
+
+local function ensureBillboard(parent, adornee, name)
+    local existing = ensureSingleChild(parent, name or "ESP_Name")
+    local bb = existing
+    if not bb or not bb:IsA("BillboardGui") then
+        if bb then bb:Destroy() end
+        bb = Instance.new("BillboardGui")
+        bb.Name = name or "ESP_Name"
+        bb.Size = UDim2.new(0, 140, 0, 22)
+        bb.StudsOffset = Vector3.new(0, 2.5, 0)
+        bb.AlwaysOnTop = true
+        bb.Adornee = adornee
+        bb.Parent = parent
+        local tl = Instance.new("TextLabel")
+        tl.Name = "Text"
+        tl.Size = UDim2.new(1, 0, 1, 0)
+        tl.BackgroundTransparency = 1
+        tl.TextScaled = false
+        tl.TextSize = 16
+        tl.Font = Enum.Font.SourceSansBold
+        tl.Parent = bb
+    else
+        bb.Adornee = adornee
+        local tl = bb:FindFirstChild("Text")
+        if tl then
+            tl.TextScaled = false
+            tl.TextSize = 16
+        end
+    end
+    return bb, bb:FindFirstChild("Text")
+end
+
+local function ensureBox(rec)
+    if rec.boxFrame then return end
+    local f = Instance.new("Frame")
+    f.Name = "ESP_Box"
+    f.AnchorPoint = Vector2.new(0.5, 0.5)
+    f.BackgroundTransparency = 1
+    f.Visible = false
+    f.Parent = screenGui
+    local s = Instance.new("UIStroke")
+    s.Thickness = 2
+    s.Parent = f
+    rec.boxFrame = f
+    rec.boxStroke = s
+end
+
+local function hideBox(rec)
+    if rec and rec.boxFrame then rec.boxFrame.Visible = false end
+end
+
+local function destroyBox(rec)
+    if rec and rec.boxFrame then rec.boxFrame:Destroy() rec.boxFrame = nil rec.boxStroke = nil end
+end
+
+local function updateBoxFromModel(rec, model, col)
+    if not showBoxes or not espEnabled or not model then
+        hideBox(rec)
+        return
+    end
+    local cf, size = model:GetBoundingBox()
+    local sx, sy, sz = size.X/2, size.Y/2, size.Z/2
+    local corners = {
+        Vector3.new(-sx, -sy, -sz), Vector3.new(-sx, -sy, sz),
+        Vector3.new(-sx, sy, -sz),  Vector3.new(-sx, sy, sz),
+        Vector3.new(sx, -sy, -sz),  Vector3.new(sx, -sy, sz),
+        Vector3.new(sx, sy, -sz),   Vector3.new(sx, sy, sz)
+    }
+    local minX, minY = math.huge, math.huge
+    local maxX, maxY = -math.huge, -math.huge
+    local anyFront = false
+    for _, v in ipairs(corners) do
+        local wp = (cf * CFrame.new(v)).Position
+        local vp = Camera:WorldToViewportPoint(wp)
+        if vp.Z > 0 then anyFront = true end
+        if vp.X < minX then minX = vp.X end
+        if vp.X > maxX then maxX = vp.X end
+        if vp.Y < minY then minY = vp.Y end
+        if vp.Y > maxY then maxY = vp.Y end
+    end
+    if not anyFront then
+        hideBox(rec)
+        return
+    end
+    ensureBox(rec)
+    local w = math.max(2, maxX - minX)
+    local h = math.max(2, maxY - minY)
+    local cx = minX + w/2
+    local cy = minY + h/2
+    rec.boxFrame.Visible = true
+    rec.boxFrame.Position = UDim2.fromOffset(cx, cy)
+    rec.boxFrame.Size = UDim2.fromOffset(w, h)
+    rec.boxStroke.Color = col
+end
+
+local function ensureConnections(plr, rec)
+    if rec.teamConn then rec.teamConn:Disconnect() rec.teamConn = nil end
+    if rec.attrConn then rec.attrConn:Disconnect() rec.attrConn = nil end
+    rec.teamConn = plr:GetPropertyChangedSignal("Team"):Connect(function()
+        rec.dirty = true
+    end)
+    if plr.GetAttributeChangedSignal then
+        rec.attrConn = plr:GetAttributeChangedSignal("Role"):Connect(function()
+            rec.dirty = true
+        end)
+    end
+end
+
+local function buildESPForCharacter(plr, char)
+    local hrp = char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart", 8)
+    if not hrp then return end
+    local head = char:FindFirstChild("Head") or char:WaitForChild("Head", 8) or hrp
+    local rec = records[plr]
+    if not rec then
+        rec = { dirty = true }
+        records[plr] = rec
+        ensureConnections(plr, rec)
+    end
+    rec.char = char
+    rec.plr = plr
+    rec.head = head
+    rec.hrp = hrp
+    rec.highlight = ensureHighlightOn(char, "ESP_Highlight")
+    rec.billboard, rec.textlabel = ensureBillboard(char, head, "ESP_Name")
+    ensureBox(rec)
+    rec.dirty = true
+end
+
+local function ensureESPFor(plr)
+    if plr == LocalPlayer then return end
+    task.spawn(function()
+        local char = plr.Character or plr.CharacterAdded:Wait()
+        if not char then return end
+        buildESPForCharacter(plr, char)
+    end)
+end
+
+local function clearESPFor(plr)
+    local rec = records[plr]
+    if not rec then return end
+    if rec.teamConn then rec.teamConn:Disconnect() rec.teamConn = nil end
+    if rec.attrConn then rec.attrConn:Disconnect() rec.attrConn = nil end
+    if rec.highlight and rec.highlight.Parent then rec.highlight:Destroy() end
+    if rec.billboard and rec.billboard.Parent then rec.billboard:Destroy() end
+    destroyBox(rec)
+    records[plr] = nil
+end
+
+local function updateRecord(rec)
+    local r = roleForPlayer(rec.plr)
+    local col = colorForRole(r)
+    if rec.highlight then
+        rec.highlight.Enabled = espEnabled and showChams
+        rec.highlight.FillColor = col
+        rec.highlight.OutlineColor = col
+        rec.highlight.Adornee = rec.char
+    end
+    if rec.billboard and rec.textlabel then
+        if r == "Killer" then
+            rec.billboard.Enabled = false
+        else
+            rec.billboard.Enabled = espEnabled and showNames
+            rec.billboard.Adornee = rec.head or rec.hrp
+            if r == "Survivor" then
+                rec.textlabel.Text = "[Survivor] " .. rec.plr.Name
+            else
+                rec.textlabel.Text = rec.plr.Name
+            end
+            rec.textlabel.TextColor3 = col
+            rec.textlabel.TextScaled = false
+            rec.textlabel.TextSize = 16
+        end
+    end
+    updateBoxFromModel(rec, rec.char, col)
+    rec.dirty = false
+end
+
+ESPTab:CreateToggle({
+    Name = "ESP Enabled",
+    CurrentValue = true,
+    Flag = "ESP_Enabled",
+    Callback = function(v)
+        espEnabled = v
+        for _, rec in pairs(records) do rec.dirty = true end
+        for _, rec in pairs(bananaRecords) do rec.dirty = true end
+        if not v then
+            for _, rec in pairs(records) do hideBox(rec) end
+            for _, rec in pairs(bananaRecords) do hideBox(rec) end
+        end
+    end
+})
+
+ESPTab:CreateToggle({
+    Name = "Show Names",
+    CurrentValue = true,
+    Flag = "ESP_Names",
+    Callback = function(v)
+        showNames = v
+        for _, rec in pairs(records) do rec.dirty = true end
+        for _, rec in pairs(bananaRecords) do rec.dirty = true end
+    end
+})
+
+ESPTab:CreateToggle({
+    Name = "Show Chams",
+    CurrentValue = true,
+    Flag = "ESP_Chams",
+    Callback = function(v)
+        showChams = v
+        for _, rec in pairs(records) do rec.dirty = true end
+        for _, rec in pairs(bananaRecords) do rec.dirty = true end
+    end
+})
+
+ESPTab:CreateToggle({
+    Name = "Show Boxes",
+    CurrentValue = true,
+    Flag = "ESP_Boxes",
+    Callback = function(v)
+        showBoxes = v
+        if not v then
+            for _, rec in pairs(records) do hideBox(rec) end
+            for _, rec in pairs(bananaRecords) do hideBox(rec) end
+        else
+            for _, rec in pairs(records) do rec.dirty = true end
+            for _, rec in pairs(bananaRecords) do rec.dirty = true end
+        end
+    end
+})
+
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(function(char)
+        buildESPForCharacter(plr, char)
+    end)
+    ensureESPFor(plr)
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+    clearESPFor(plr)
+end)
+
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer then
+        p.CharacterAdded:Connect(function(char)
+            buildESPForCharacter(p, char)
+        end)
+        ensureESPFor(p)
+    end
+end
+
+local function findBananaModel(container)
+    if container:IsA("Model") then return container end
+    local m = container:FindFirstChild("banana1") or container:FindFirstChild("Base")
+    if m and m:IsA("Model") then return m end
+    local candidate = container:FindFirstChildWhichIsA("Model", true)
+    if candidate then return candidate end
+    return nil
+end
+
+local function findBananaAnchor(model)
+    local head = model:FindFirstChild("Head", true)
+    local root = model:FindFirstChild("HumanoidRootPart", true) or model:FindFirstChild("Root", true) or model:FindFirstChild("RootBase", true)
+    local base = model:FindFirstChild("Base", true)
+    local any = model:FindFirstChildWhichIsA("BasePart", true)
+    return head or root or base or any
+end
+
+local bananasFolder
+local bananasAddedConn, bananasRemovedConn, bananasDescAddedConn
+
+local function labelForBananaContainer(container)
+    if container.Name == "LobbyBananaAI" or string.find(string.lower(container.Name), "ai") then
+        return "BananaAI"
+    end
+    local plr = Players:FindFirstChild(container.Name)
+    if plr then return plr.Name end
+    return container.Name
+end
+
+local function bananaBuild(container)
+    local model = findBananaModel(container)
+    if not model then return end
+    local anchor = findBananaAnchor(model)
+    if not anchor then return end
+    local rec = bananaRecords[container]
+    if not rec then
+        rec = { container = container, dirty = true }
+        bananaRecords[container] = rec
+    end
+    rec.model = model
+    rec.anchor = anchor
+    rec.label = labelForBananaContainer(container)
+    ensureSingleChild(model, "ESP_Banana_Name")
+    rec.highlight = ensureHighlightOn(model, "ESP_Banana_Highlight")
+    rec.billboard, rec.textlabel = ensureBillboard(model, anchor, "ESP_Banana_Name")
+    ensureBox(rec)
+    rec.dirty = true
+end
+
+local function bananaClear(container)
+    local rec = bananaRecords[container]
+    if not rec then return end
+    if rec.highlight and rec.highlight.Parent then rec.highlight:Destroy() end
+    if rec.billboard and rec.billboard.Parent then rec.billboard:Destroy() end
+    destroyBox(rec)
+    bananaRecords[container] = nil
+end
+
+local function bananaUpdate(rec)
+    local col = killerColor
+    if rec.highlight then
+        rec.highlight.Enabled = espEnabled and showChams
+        rec.highlight.FillColor = col
+        rec.highlight.OutlineColor = col
+        rec.highlight.Adornee = rec.model
+    end
+    if rec.billboard and rec.textlabel then
+        rec.billboard.Enabled = espEnabled and showNames
+        rec.billboard.Adornee = rec.anchor
+        rec.textlabel.Text = rec.label or "BananaAI"
+        rec.textlabel.TextColor3 = col
+        rec.textlabel.TextScaled = false
+        rec.textlabel.TextSize = 16
+    end
+    updateBoxFromModel(rec, rec.model, col)
+    rec.dirty = false
+end
+
+local function hookBananasFolder(folder)
+    if bananasAddedConn then bananasAddedConn:Disconnect() bananasAddedConn = nil end
+    if bananasRemovedConn then bananasRemovedConn:Disconnect() bananasRemovedConn = nil end
+    if bananasDescAddedConn then bananasDescAddedConn:Disconnect() bananasDescAddedConn = nil end
+    bananasFolder = folder
+    bananasAddedConn = folder.ChildAdded:Connect(function(ch) bananaBuild(ch) end)
+    bananasRemovedConn = folder.ChildRemoved:Connect(function(ch) bananaClear(ch) end)
+    bananasDescAddedConn = folder.DescendantAdded:Connect(function(_) for _, rec in pairs(bananaRecords) do rec.dirty = true end end)
+    for _, child in ipairs(folder:GetChildren()) do bananaBuild(child) end
+end
+
+local function ensureBananasWatchers()
+    local gb = Workspace:FindFirstChild("GameBananas")
+    if gb then
+        hookBananasFolder(gb)
+    else
+        Workspace.ChildAdded:Connect(function(ch)
+            if ch.Name == "GameBananas" then
+                hookBananasFolder(ch)
+            end
+        end)
+    end
+end
+
+ensureBananasWatchers()
+
+RunService.RenderStepped:Connect(function()
+    if not espEnabled then
+        for _, rec in pairs(records) do
+            if rec.highlight then rec.highlight.Enabled = false end
+            if rec.billboard then rec.billboard.Enabled = false end
+            hideBox(rec)
+        end
+        for _, rec in pairs(bananaRecords) do
+            if rec.highlight then rec.highlight.Enabled = false end
+            if rec.billboard then rec.billboard.Enabled = false end
+            hideBox(rec)
+        end
+        return
+    end
+    for _, rec in pairs(records) do
+        if rec.plr and rec.plr.Parent and rec.char and rec.char.Parent then
+            if rec.dirty then updateRecord(rec) else
+                local r = roleForPlayer(rec.plr)
+                updateBoxFromModel(rec, rec.char, colorForRole(r))
+            end
+        else
+            if rec.plr then clearESPFor(rec.plr) end
+        end
+    end
+    for container, rec in pairs(bananaRecords) do
+        if container and container.Parent and rec.model and rec.model.Parent then
+            if rec.dirty then bananaUpdate(rec) else
+                updateBoxFromModel(rec, rec.model, killerColor)
+            end
+        else
+            bananaClear(container)
+        end
+    end
+end)
+
+local AutoTab = Window:CreateTab("Auto")
+AutoTab:CreateSection("Map")
+
+local autoDeletePeels = false
+local autoCollectCoins = false
+local autoCollectPumpkins = false
+local peelsFolder = nil
+local tokensFolder = nil
+local pumpkinsFolder = nil
+local peelAddedConn = nil
+local tokenAddedConn = nil
+local pumpkinsConn = nil
+
+local function currentGK()
+    return Workspace:FindFirstChild("GameKeeper")
+end
+
+local function currentMap()
+    local gk = currentGK()
+    if not gk then return nil end
+    return gk:FindFirstChild("Map")
+end
+
+local function findPeels()
+    local map = currentMap()
+    if not map then return nil end
+    return map:FindFirstChild("Peels") or map:FindFirstChild("peels") or map:FindFirstChild("PEELS")
+end
+
+local function findTokens()
+    local map = currentMap()
+    if not map then return nil end
+    return map:FindFirstChild("Tokens") or map:FindFirstChild("tokens") or map:FindFirstChild("TOKENS")
+end
+
+local function findPumpkins()
+    local map = currentMap()
+    if not map then return nil end
+    return map:FindFirstChild("PumpkinSpawns") or map:FindFirstChild("Pumpkins") or map:FindFirstChild("PUMPKINSPAWNS")
+end
+
+local function disconnectPeels()
+    if peelAddedConn then peelAddedConn:Disconnect() peelAddedConn = nil end
+end
+
+local function disconnectTokens()
+    if tokenAddedConn then tokenAddedConn:Disconnect() tokenAddedConn = nil end
+end
+
+local function disconnectPumpkins()
+    if pumpkinsConn then pumpkinsConn:Disconnect() pumpkinsConn = nil end
+end
+
+local function purgePeels()
+    if not peelsFolder then return end
+    for _, obj in ipairs(peelsFolder:GetChildren()) do pcall(function() obj:Destroy() end) end
+end
+
+local function touchPart(part)
+    if not character then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    pcall(function()
+        firetouchinterest(hrp, part, 0)
+        task.wait()
+        firetouchinterest(hrp, part, 1)
+    end)
+end
+
+local function collectAllTokens()
+    if not tokensFolder then return end
+    for _, d in ipairs(tokensFolder:GetDescendants()) do
+        if d:IsA("TouchTransmitter") or d.Name == "TouchInterest" then
+            local part = d.Parent
+            if part and part:IsA("BasePart") then
+                touchPart(part)
+            end
+        end
+    end
+end
+
+local function pumpkinPartFromDescendant(desc)
+    if desc:IsA("TouchTransmitter") or desc.Name == "TouchInterest" then
+        local part = desc.Parent
+        if part and part:IsA("BasePart") and part.Name == "HumanoidRootPart" then
+            if part:FindFirstAncestor("PumpkinPickUp") then
+                return part
+            end
+        end
+    end
+    return nil
+end
+
+local function collectAllPumpkins()
+    if not pumpkinsFolder then return end
+    for _, d in ipairs(pumpkinsFolder:GetDescendants()) do
+        local p = pumpkinPartFromDescendant(d)
+        if p then touchPart(p) end
+    end
+end
+
+AutoTab:CreateToggle({
+    Name = "AutoDeletePeels",
+    CurrentValue = false,
+    Flag = "AutoDeletePeels",
+    Callback = function(v)
+        autoDeletePeels = v
+        if not v then
+            disconnectPeels()
+            return
+        end
+        peelsFolder = findPeels()
+        if peelsFolder then
+            purgePeels()
+            disconnectPeels()
+            peelAddedConn = peelsFolder.ChildAdded:Connect(function(ch)
+                if autoDeletePeels then pcall(function() ch:Destroy() end) end
+            end)
+        end
+    end
+})
+
+AutoTab:CreateToggle({
+    Name = "AutoCollectCoins",
+    CurrentValue = false,
+    Flag = "AutoCollectCoins",
+    Callback = function(v)
+        autoCollectCoins = v
+        if not v then
+            disconnectTokens()
+            return
+        end
+        tokensFolder = findTokens()
+        if tokensFolder then
+            collectAllTokens()
+            disconnectTokens()
+            tokenAddedConn = tokensFolder.DescendantAdded:Connect(function(desc)
+                if not autoCollectCoins then return end
+                if desc:IsA("TouchTransmitter") or desc.Name == "TouchInterest" then
+                    local part = desc.Parent
+                    if part and part:IsA("BasePart") then
+                        task.defer(function()
+                            if autoCollectCoins then touchPart(part) end
+                        end)
+                    end
+                end
+            end)
+        end
+    end
+})
+
+AutoTab:CreateToggle({
+    Name = "AutoCollectPumpkins",
+    CurrentValue = false,
+    Flag = "AutoCollectPumpkins",
+    Callback = function(v)
+        autoCollectPumpkins = v
+        if not v then
+            disconnectPumpkins()
+            return
+        end
+        pumpkinsFolder = findPumpkins()
+        if pumpkinsFolder then
+            collectAllPumpkins()
+            disconnectPumpkins()
+            pumpkinsConn = pumpkinsFolder.DescendantAdded:Connect(function(desc)
+                if not autoCollectPumpkins then return end
+                local part = pumpkinPartFromDescendant(desc)
+                if part then
+                    task.defer(function()
+                        if autoCollectPumpkins then touchPart(part) end
+                    end)
+                end
+            end)
+        end
+    end
+})
+
+local WorldTab = Window:CreateTab("World")
+WorldTab:CreateSection("Map ESP")
+
+local worldCoinsEnabled = false
+local worldPumpkinsEnabled = false
+local worldShowNames = true
+local worldShowChams = true
+local worldShowBoxes = false
+
+local coinColor = Color3.fromRGB(255, 215, 0)
+local pumpkinColor = Color3.fromRGB(255, 140, 0)
+
+local coinRecords = {}
+local pumpkinRecords = {}
+local coinsConn = nil
+local pumpkinsEspConn = nil
+
+local function clearWorldRec(tbl, key)
+    local rec = tbl[key]
+    if not rec then return end
+    if rec.ancestry then rec.ancestry:Disconnect() rec.ancestry = nil end
+    if rec.highlight and rec.highlight.Parent then rec.highlight:Destroy() end
+    if rec.billboard and rec.billboard.Parent then rec.billboard:Destroy() end
+    destroyBox(rec)
+    tbl[key] = nil
+end
+
+local function clearWorldTable(tbl)
+    for key, _ in pairs(tbl) do
+        clearWorldRec(tbl, key)
+    end
+end
+
+local function tokenContainerFromPart(part)
+    local top = part
+    local limit = 0
+    while top and top.Parent and top.Parent ~= tokensFolder and limit < 10 do
+        top = top.Parent
+        limit += 1
+    end
+    return top or part
+end
+
+local function buildCoinESPFromPart(part)
+    local container = tokenContainerFromPart(part)
+    if not container then return end
+    if coinRecords[container] then return end
+    local anchor = part
+    local rec = { inst = container, anchor = anchor, dirty = true }
+    coinRecords[container] = rec
+    rec.highlight = ensureHighlightOn(container, "ESP_Highlight")
+    rec.billboard, rec.textlabel = ensureBillboard(container, anchor, "ESP_Name")
+    ensureBox(rec)
+    rec.ancestry = container.AncestryChanged:Connect(function(_, parent)
+        if not parent then clearWorldRec(coinRecords, container) end
+    end)
+end
+
+local function buildPumpkinESPFromModel(pickupModel)
+    if pumpkinRecords[pickupModel] then return end
+    local hrp = pickupModel:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local rec = { inst = pickupModel, anchor = hrp, dirty = true }
+    pumpkinRecords[pickupModel] = rec
+    rec.highlight = ensureHighlightOn(pickupModel, "ESP_Highlight")
+    rec.billboard, rec.textlabel = ensureBillboard(pickupModel, hrp, "ESP_Name")
+    ensureBox(rec)
+    rec.ancestry = pickupModel.AncestryChanged:Connect(function(_, parent)
+        if not parent then clearWorldRec(pumpkinRecords, pickupModel) end
+    end)
+end
+
+local function refreshAllCoinsInitial()
+    if not tokensFolder then return end
+    for _, d in ipairs(tokensFolder:GetDescendants()) do
+        if d:IsA("TouchTransmitter") or d.Name == "TouchInterest" then
+            local p = d.Parent
+            if p and p:IsA("BasePart") then
+                buildCoinESPFromPart(p)
+            end
+        end
+    end
+end
+
+local function refreshAllPumpkinsInitial()
+    if not pumpkinsFolder then return end
+    for _, spawn in ipairs(pumpkinsFolder:GetDescendants()) do
+        if spawn:IsA("Model") and spawn.Name == "PumpkinPickUp" then
+            buildPumpkinESPFromModel(spawn)
+        end
+        if spawn:IsA("BasePart") and spawn.Name == "HumanoidRootPart" then
+            local pick = spawn:FindFirstAncestor("PumpkinPickUp")
+            if pick then buildPumpkinESPFromModel(pick) end
+        end
+    end
+end
+
+local function applyWorldVisual(rec, labelText, col, isModel, modelOrPart)
+    if rec.highlight then
+        rec.highlight.Enabled = worldShowChams
+        rec.highlight.FillColor = col
+        rec.highlight.OutlineColor = col
+        rec.highlight.Adornee = rec.inst
+    end
+    if rec.billboard and rec.textlabel then
+        rec.billboard.Enabled = worldShowNames
+        rec.billboard.Adornee = rec.anchor
+        rec.textlabel.Text = labelText
+        rec.textlabel.TextColor3 = col
+        rec.textlabel.TextScaled = false
+        rec.textlabel.TextSize = 16
+    end
+    if worldShowBoxes then
+        if isModel then
+            updateBoxFromModel(rec, modelOrPart, col)
+        else
+            local dummy = { boxFrame = rec.boxFrame, boxStroke = rec.boxStroke }
+            dummy.boxFrame = rec.boxFrame
+            dummy.boxStroke = rec.boxStroke
+            updateBoxFromModel(rec, rec.inst, col)
+        end
+    else
+        hideBox(rec)
+    end
+end
+
+WorldTab:CreateToggle({
+    Name = "Coins ESP",
+    CurrentValue = false,
+    Flag = "World_CoinsESP",
+    Callback = function(v)
+        worldCoinsEnabled = v
+        if not v then
+            if coinsConn then coinsConn:Disconnect() coinsConn = nil end
+            clearWorldTable(coinRecords)
+            return
+        end
+        tokensFolder = findTokens()
+        if not tokensFolder then return end
+        refreshAllCoinsInitial()
+        if coinsConn then coinsConn:Disconnect() coinsConn = nil end
+        coinsConn = tokensFolder.DescendantAdded:Connect(function(desc)
+            if not worldCoinsEnabled then return end
+            if desc:IsA("TouchTransmitter") or desc.Name == "TouchInterest" then
+                local p = desc.Parent
+                if p and p:IsA("BasePart") then
+                    buildCoinESPFromPart(p)
+                end
+            end
+        end)
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Pumpkins ESP",
+    CurrentValue = false,
+    Flag = "World_PumpkinsESP",
+    Callback = function(v)
+        worldPumpkinsEnabled = v
+        if not v then
+            if pumpkinsEspConn then pumpkinsEspConn:Disconnect() pumpkinsEspConn = nil end
+            clearWorldTable(pumpkinRecords)
+            return
+        end
+        pumpkinsFolder = findPumpkins()
+        if not pumpkinsFolder then return end
+        refreshAllPumpkinsInitial()
+        if pumpkinsEspConn then pumpkinsEspConn:Disconnect() pumpkinsEspConn = nil end
+        pumpkinsEspConn = pumpkinsFolder.DescendantAdded:Connect(function(desc)
+            if not worldPumpkinsEnabled then return end
+            if desc:IsA("Model") and desc.Name == "PumpkinPickUp" then
+                buildPumpkinESPFromModel(desc)
+            elseif desc:IsA("BasePart") and desc.Name == "HumanoidRootPart" then
+                local pick = desc:FindFirstAncestor("PumpkinPickUp")
+                if pick then buildPumpkinESPFromModel(pick) end
+            end
+        end)
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "World Names",
+    CurrentValue = true,
+    Flag = "World_ShowNames",
+    Callback = function(v)
+        worldShowNames = v
+        for _, rec in pairs(coinRecords) do rec.dirty = true end
+        for _, rec in pairs(pumpkinRecords) do rec.dirty = true end
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "World Chams",
+    CurrentValue = true,
+    Flag = "World_ShowChams",
+    Callback = function(v)
+        worldShowChams = v
+        for _, rec in pairs(coinRecords) do rec.dirty = true end
+        for _, rec in pairs(pumpkinRecords) do rec.dirty = true end
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "World Boxes",
+    CurrentValue = false,
+    Flag = "World_ShowBoxes",
+    Callback = function(v)
+        worldShowBoxes = v
+        if not v then
+            for _, rec in pairs(coinRecords) do hideBox(rec) end
+            for _, rec in pairs(pumpkinRecords) do hideBox(rec) end
+        else
+            for _, rec in pairs(coinRecords) do rec.dirty = true end
+            for _, rec in pairs(pumpkinRecords) do rec.dirty = true end
+        end
+    end
+})
+
+RunService.RenderStepped:Connect(function()
+    if worldCoinsEnabled and tokensFolder then
+        for container, rec in pairs(coinRecords) do
+            if container and container.Parent and rec.anchor and rec.anchor.Parent then
+                if rec.dirty then
+                    applyWorldVisual(rec, "Coin", coinColor, container:IsA("Model"), rec.anchor)
+                    rec.dirty = false
+                else
+                    if worldShowBoxes then
+                        updateBoxFromModel(rec, container, coinColor)
+                    end
+                end
+            else
+                clearWorldRec(coinRecords, container)
+            end
+        end
+    end
+    if worldPumpkinsEnabled and pumpkinsFolder then
+        for container, rec in pairs(pumpkinRecords) do
+            if container and container.Parent and rec.anchor and rec.anchor.Parent then
+                if rec.dirty then
+                    applyWorldVisual(rec, "Pumpkin", pumpkinColor, true, container)
+                    rec.dirty = false
+                else
+                    if worldShowBoxes then
+                        updateBoxFromModel(rec, container, pumpkinColor)
+                    end
+                end
+            else
+                clearWorldRec(pumpkinRecords, container)
+            end
+        end
+    end
+end)
+
+local VisualsTab = Window:CreateTab("Visuals")
+VisualsTab:CreateSection("Rendering")
+
+local removeFog = true
+local function applyFogSetting()
+    if removeFog then
+        Lighting.FogStart = 0
+        Lighting.FogEnd = 1e10
+        local atmo = Lighting:FindFirstChildOfClass("Atmosphere")
+        if atmo then
+            atmo.Density = 0
+            atmo.Haze = 0
+            atmo.Glare = 0
+            atmo.Offset = 0
+        end
+    end
+end
+
+VisualsTab:CreateToggle({
+    Name = "Remove Fog",
+    CurrentValue = true,
+    Flag = "RemoveFog",
+    Callback = function(v)
+        removeFog = v
+        if v then applyFogSetting() end
+    end
+})
+
+Lighting.ChildAdded:Connect(function(ch)
+    if removeFog and ch:IsA("Atmosphere") then
+        task.defer(applyFogSetting)
+    end
+end)
+
+applyFogSetting()
