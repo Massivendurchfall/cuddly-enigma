@@ -105,6 +105,8 @@ local function disableNoclip()
     if noclipConn then noclipConn:Disconnect() noclipConn=nil end
 end
 
+-- NOTE: Falls mehrere Seats in einer Couch stecken, wird aktuell der erste gefundene Seat genutzt.
+-- Wenn du ein bestimmtes Kriterium willst (z.B. unbesetzt, bestimmter Name/Index), sag kurz Bescheid, dann passe ich die Auswahl an.
 local function tpVipSeat()
     local map=Workspace:FindFirstChild("Map")
     local poi=map and map:FindFirstChild("POI")
@@ -115,8 +117,11 @@ local function tpVipSeat()
     if deco then
         for _,c in ipairs(deco:GetChildren()) do
             if string.find(c.Name,"Couch") then
-                local s=c:FindFirstChild("Seat",true)
-                if s and s:IsA("Seat") then seatFound=s break end
+                -- Suche ALLE Seat-Instanzen innerhalb der Couch (mehrere möglich)
+                for _,d in ipairs(c:GetDescendants()) do
+                    if d:IsA("Seat") then seatFound=d break end
+                end
+                if seatFound then break end
             end
         end
     end
@@ -399,6 +404,9 @@ Tabs.Info:CreateParagraph({Title="Info",Content="★ Made by jlcfg ★\nDiscord:
 Rayfield:Notify({Title="VoiceChat Script",Content="Script loaded! jlcfg on discord",Duration=12})
 Rayfield:LoadConfiguration()
 
+--////////////////////////////////////////////
+--//////////////  ANIMATION PACKS  ///////////
+--////////////////////////////////////////////
 local Packs={
     Astronaut={run={891636393},walk={891636393},jump={891627522},idle={891621366,891633237,1047759695},fall={891617961},swim={891639666},swimidle={891663592},climb={891609353}},
     Bubbly={run={910025107},walk={910034870},jump={910016857},idle={910004836,910009958,1018536639},fall={910001910},swim={910028158},swimidle={910030921},climb={909997997}},
@@ -416,7 +424,44 @@ local Packs={
     Toy={run={782842708},walk={782843345},jump={782847020},idle={782841498,782845736,980952228},fall={782846423},swim={782844582},swimidle={782845186},climb={782843869}},
     Vampire={run={1083462077},walk={1083473930},jump={1083455352},idle={1083445855,1083450166,1088037547},fall={1083443587},swim={1083464683},swimidle={1083467779},climb={1083439238}},
     Werewolf={run={1083216690},walk={1083178339},jump={1083218792},idle={1083195517,1083214717,1099492820},fall={1083189019},swim={1083222527},swimidle={1083225406},climb={1083182000}},
-    Zombie={run={616163682},walk={616168032},jump={616161997},idle={616158929,616160636,885545458},fall={616157476},swim={616165109},swimidle={616166655},climb={616156119}}
+    Zombie={run={616163682},walk={616168032},jump={616161997},idle={616158929,616160636,885545458},fall={616157476},swim={616165109},swimidle={616166655},climb={616156119}},
+
+    -- NEW: User-supplied packs
+    ["Confident Animation Pack"]={ -- Confident
+        run={1070001516}, walk={1070017263}, jump={1069984524},
+        idle={1069977950,1069987858}, fall={1069973677},
+        swim={1070009914}, swimidle={1070012133}, climb={1069946257}
+    },
+    ["Popstar Animation Pack"]={ -- Popstar
+        run={1212980348}, walk={1212980338}, jump={1212954642},
+        idle={1212900985,1212954651}, fall={1212900995},
+        swim={1212852603}, swimidle={1212998578}, climb={1213044953,1213044939}
+    },
+    ["Patrol Animation Pack"]={ -- Patrol
+        run={1150967949}, walk={1151231493}, jump={1150944216},
+        idle={1149612882,1150842221}, fall={1148863382},
+        swim={1151204998}, swimidle={1151221899}, climb={1148811837}
+    },
+    ["Sneaky Animation Pack"]={ -- Sneaky
+        run={1132494274}, walk={1132510133}, jump={1132489853},
+        idle={1132473842,1132477671}, fall={1132469004},
+        swim={1132500520}, swimidle={1132506407}, climb={1132461372}
+    },
+    ["Princess Animation Pack"]={ -- Princess
+        run={941015281}, walk={941028902}, jump={941008832},
+        idle={941003647,941013098}, fall={941000007},
+        swim={941018893}, swimidle={941025398}, climb={940996062}
+    },
+    ["Cowboy Animation Pack"]={ -- Cowboy
+        run={1014401683}, walk={1014421541}, jump={1014394726},
+        idle={1014390418,1014398616}, fall={1014384571},
+        swim={1014406523}, swimidle={1014411816}, climb={1014380606}
+    },
+    ["Stylized Female"]={ -- Stylized Female
+        run={4708192705}, walk={4708193840}, jump={4708188025},
+        idle={4708191566,4708192150}, fall={4708186162},
+        swim={4708189360}, swimidle={4708190607}, climb={4708184253}
+    }
 }
 
 local AnimSelection={pack="Zombie",idle=nil,walk=nil,run=nil,jump=nil,fall=nil,climb=nil,swim=nil,swimidle=nil}
@@ -513,28 +558,29 @@ end
 populateFromPack(AnimSelection.pack)
 rebuildAppliedIds()
 
+-- Build global option lists across ALL packs; labels = "id (PackName)"
 local function buildGlobalStateMaps()
     local maps={idle={},walk={},run={},jump={},fall={},climb={},swim={},swimidle={}}
     local lists={idle={},walk={},run={},jump={},fall={},climb={},swim={},swimidle={}}
     for packName,pack in pairs(Packs) do
-        for _,id in ipairs(pack.idle) do local key=tostring(id).." ("..packName..")"; maps.idle[key]=id table.insert(lists.idle,key) end
-        for _,id in ipairs(pack.walk) do local key=tostring(id).." ("..packName..")"; maps.walk[key]=id table.insert(lists.walk,key) end
-        for _,id in ipairs(pack.run) do local key=tostring(id).." ("..packName..")"; maps.run[key]=id table.insert(lists.run,key) end
-        for _,id in ipairs(pack.jump) do local key=tostring(id).." ("..packName..")"; maps.jump[key]=id table.insert(lists.jump,key) end
-        for _,id in ipairs(pack.fall) do local key=tostring(id).." ("..packName..")"; maps.fall[key]=id table.insert(lists.fall,key) end
-        for _,id in ipairs(pack.climb) do local key=tostring(id).." ("..packName..")"; maps.climb[key]=id table.insert(lists.climb,key) end
-        for _,id in ipairs(pack.swim) do local key=tostring(id).." ("..packName..")"; maps.swim[key]=id table.insert(lists.swim,key) end
-        for _,id in ipairs(pack.swimidle) do local key=tostring(id).." ("..packName..")"; maps.swimidle[key]=id table.insert(lists.swimidle,key) end
+        for _,id in ipairs(pack.idle or {}) do local key=tostring(id).." ("..packName..")"; maps.idle[key]=id table.insert(lists.idle,key) end
+        for _,id in ipairs(pack.walk or {}) do local key=tostring(id).." ("..packName..")"; maps.walk[key]=id table.insert(lists.walk,key) end
+        for _,id in ipairs(pack.run or {}) do local key=tostring(id).." ("..packName..")"; maps.run[key]=id table.insert(lists.run,key) end
+        for _,id in ipairs(pack.jump or {}) do local key=tostring(id).." ("..packName..")"; maps.jump[key]=id table.insert(lists.jump,key) end
+        for _,id in ipairs(pack.fall or {}) do local key=tostring(id).." ("..packName..")"; maps.fall[key]=id table.insert(lists.fall,key) end
+        for _,id in ipairs(pack.climb or {}) do local key=tostring(id).." ("..packName..")"; maps.climb[key]=id table.insert(lists.climb,key) end
+        for _,id in ipairs(pack.swim or {}) do local key=tostring(id).." ("..packName..")"; maps.swim[key]=id table.insert(lists.swim,key) end
+        for _,id in ipairs(pack.swimidle or {}) do local key=tostring(id).." ("..packName..")"; maps.swimidle[key]=id table.insert(lists.swimidle,key) end
     end
     local function sortList(t) table.sort(t,function(a,b) local na=tonumber(a:match("^(%d+)")) or 0 local nb=tonumber(b:match("^(%d+)")) or 0 if na==nb then return a<b else return na<nb end end) end
-    for k,v in pairs(lists) do sortList(v) end
+    for _,v in pairs(lists) do sortList(v) end
     return maps,lists
 end
 
 local StateMap,StateList=buildGlobalStateMaps()
 
 local function labelFor(state,id)
-    local target=tostring(id)
+    local target=tostring(id or "")
     for _,label in ipairs(StateList[state]) do
         if label:match("^"..target.." ") then return label end
     end
@@ -615,8 +661,11 @@ local ddSwimIdle=Tabs.Anim:CreateDropdown({Name="Swim Idle",Options=StateList.sw
 Tabs.Anim:CreateButton({Name="Apply Overrides",Callback=function() applyAnimOverridesReliable() Rayfield:Notify({Title="Animations",Content="Applied.",Duration=5}) end})
 Tabs.Anim:CreateToggle({Name="Reapply on respawn",CurrentValue=true,Flag="ReapplyRespawn",Callback=function(v) ReapplyOnRespawn=v end})
 
+--////////////  EMOTE PLAYER  ////////////
 local EmoteIdInput=""
 local EmoteSpeedValue=1
+local EmoteTrack=nil
+local EmoteLoop=false
 
 local function getAnimator()
     local hum=LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
