@@ -5,6 +5,7 @@ local RunService=game:GetService("RunService")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
 local GroupService=game:GetService("GroupService")
 local HttpService=game:GetService("HttpService")
+local MarketplaceService=game:GetService("MarketplaceService")
 
 local localPlayer=Players.LocalPlayer
 
@@ -29,6 +30,151 @@ local respawnTimes={}
 local lastPos={}
 local suspiciousTP={}
 local AFKTracker={}
+
+local FS_AVAILABLE=(typeof(isfolder)=="function" and typeof(makefolder)=="function" and typeof(writefile)=="function" and typeof(readfile)=="function")
+local STORAGE_DIR="PlayerGames_7d"
+if FS_AVAILABLE and not isfolder(STORAGE_DIR) then pcall(function()makefolder(STORAGE_DIR)end) end
+
+local GameTrackTargets={}
+local GameTrackCache={}
+local FriendsPollConn=nil
+local FRIENDS_POLL_INTERVAL=60
+
+local function todayYMD(t)local d=os.date("!*t",t or os.time())return string.format("%04d-%02d-%02d",d.year,d.month,d.day)end
+local function ymdToEpoch(ymd)local y,m,d=ymd:match("^(%d+)%-(%d+)%-(%d+)$")local tt=os.time{year=tonumber(y),month=tonumber(m),day=tonumber(d),hour=0,min=0,sec=0}return tt end
+local function withinLast7Days(ymd)local base=ymdToEpoch(ymd)local now=os.time()return (now-base)<=7*86400 end
+
+local function readJsonFile(path)local ok,txt=pcall(function()return readfile(path)end)if not ok or not txt or txt=="" then return {} end local ok2,data=pcall(function()return HttpService:JSONDecode(txt)end)if ok2 and type(data)=="table" then return data end return {} end
+local function writeJsonFile(path,tab)local ok,txt=pcall(function()return HttpService:JSONEncode(tab)end)if not ok then return end pcall(function()writefile(path,txt)end)end
+
+local function loadUserGameLog(uid)local key=STORAGE_DIR.."/"..tostring(uid)..".json"if not FS_AVAILABLE then return {} end return readJsonFile(key)end
+local function saveUserGameLog(uid,data)if not FS_AVAILABLE then return end local key=STORAGE_DIR.."/"..tostring(uid)..".json"writeJsonFile(key,data)end
+
+local function pruneOldDays(data)local res={}for day,byPlace in pairs(data)do if withinLast7Days(day) then res[day]=byPlace end end return res end
+
+local function addPlaySeconds(uid,placeId,seconds)
+	if seconds<=0 then return end
+	GameTrackCache[uid]=GameTrackCache[uid] or {data={},lastFlush=os.time()}
+	local day=todayYMD()
+	local data=GameTrackCache[uid].data
+	data[day]=data[day] or {}
+	data[day][tostring(placeId)]=(data[day][tostring(placeId)] or 0)+seconds
+	if FS_AVAILABLE and (os.time()-GameTrackCache[uid].lastFlush)>=120 then
+		local disk=loadUserGameLog(uid)
+		for d,mp in pairs(data)do
+			disk[d]=disk[d] or {}
+			for pid,sec in pairs(mp)do
+				disk[d][pid]=(disk[d][pid] or 0)+sec
+			end
+		end
+		disk=pruneOldDays(disk)
+		saveUserGameLog(uid,disk)
+		GameTrackCache[uid].data={}
+		GameTrackCache[uid].lastFlush=os.time()
+	end
+end
+
+local PlaceNameCache={}
+local function getPlaceName(placeId)
+	if PlaceNameCache[placeId] then return PlaceNameCache[placeId] end
+	local ok,info=pcall(function()return MarketplaceService:GetProductInfo(placeId,Enum.InfoType.Asset)end)
+	local name=ok and (info and info.Name) or ("Place "..tostring(placeId))
+	PlaceNameCache[placeId]=name
+	return name
+end
+
+local function pollFriendsAndAccumulate(dt)
+	local ok,list=pcall(function()return localPlayer:GetFriendsOnline()end)
+	if not ok or type(list)~="table" then return end
+	local now=os.time()
+	for _,f in ipairs(list)do
+		local uid=f.VisitorId or f.VisitorIdV2 or f.PlayerId or f.Id
+		if uid and GameTrackTargets[uid] then
+			if f.IsOnline and f.PlaceId then
+				local rec=GameTrackTargets[uid]
+				local placeId=tostring(f.PlaceId)
+				if rec.currentPlace~=placeId then
+					if rec.currentPlace and rec.lastTick then
+						local delta=math.max(0,now-rec.lastTick)
+						addPlaySeconds(uid,rec.currentPlace,delta)
+					end
+					rec.currentPlace=placeId
+					rec.lastTick=now
+				else
+					if rec.lastTick then
+						local delta=math.max(0,now-rec.lastTick)
+						addPlaySeconds(uid,rec.currentPlace,delta)
+						rec.lastTick=now
+					else
+						rec.lastTick=now
+					end
+				end
+			else
+				local rec=GameTrackTargets[uid]
+				if rec.currentPlace and rec.lastTick then
+					local delta=math.max(0,now-rec.lastTick)
+					addPlaySeconds(uid,rec.currentPlace,delta)
+				end
+				if rec then rec.currentPlace=nil rec.lastTick=nil end
+			end
+		end
+	end
+end
+
+local function ensureFriendsPoll()
+	if FriendsPollConn then return end
+	local acc=0
+	FriendsPollConn=RunService.Heartbeat:Connect(function(dt)
+		acc+=dt
+		if acc>=FRIENDS_POLL_INTERVAL then
+			acc=0
+			pollFriendsAndAccumulate(dt)
+		end
+	end)
+end
+
+local function maybeStopFriendsPoll()
+	local any=false
+	for _ in pairs(GameTrackTargets)do any=true break end
+	if not any and FriendsPollConn then
+		FriendsPollConn:Disconnect()
+		FriendsPollConn=nil
+	end
+end
+
+local function startTrackingUser(uid)
+	if not localPlayer:IsFriendsWith(uid) then return false end
+	if not GameTrackTargets[uid] then
+		GameTrackTargets[uid]={currentPlace=nil,lastTick=nil}
+	end
+	ensureFriendsPoll()
+	return true
+end
+
+local function stopTrackingUser(uid)
+	if GameTrackTargets[uid] then
+		GameTrackTargets[uid]=nil
+		maybeStopFriendsPoll()
+	end
+end
+
+local function aggregate7Days(uid)
+	local mem=GameTrackCache[uid] and GameTrackCache[uid].data or {}
+	local disk=loadUserGameLog(uid)
+	local merged={}
+	for d,map in pairs(disk)do if withinLast7Days(d) then
+		for pid,sec in pairs(map)do merged[pid]=(merged[pid] or 0)+sec end
+	end end
+	for d,map in pairs(mem)do if withinLast7Days(d) then
+		for pid,sec in pairs(map)do merged[pid]=(merged[pid] or 0)+sec end
+	end end
+	local list={}
+	for pid,sec in pairs(merged)do
+		table.insert(list,{placeId=tonumber(pid),seconds=sec,name=getPlaceName(tonumber(pid))})
+	end
+	table.sort(list,function(a,b) return a.seconds>b.seconds end)
+	return list
+end
 
 local function uiStroke(p,t)local s=Instance.new("UIStroke")s.Thickness=t or 1;s.Color=THEME.line;s.Transparency=0.15;s.Parent=p end
 local function uiCorner(p,r)local c=Instance.new("UICorner");c.CornerRadius=UDim.new(0,r or 12);c.Parent=p end
@@ -371,6 +517,36 @@ local function fillMore(player)
 	end)
 end
 
+local GamesModal=Instance.new("Frame")GamesModal.Size=UDim2.new(0,layoutMode=="mobile" and 420 or 520,0,layoutMode=="mobile" and 460 or 520)GamesModal.BackgroundColor3=THEME.panel GamesModal.Visible=false GamesModal.Parent=screenGui uiCorner(GamesModal,14)uiStroke(GamesModal,1)pad(GamesModal,12,12,12,12)
+GamesModal.Position=UDim2.new(0.5,-GamesModal.Size.X.Offset/2,0.5,-GamesModal.Size.Y.Offset/2)
+local gHead=Instance.new("Frame")gHead.Size=UDim2.new(1,0,0,56)gHead.BackgroundColor3=THEME.header gHead.Parent=GamesModal uiCorner(gHead,12)uiStroke(gHead,1)
+local gTitle=Instance.new("TextLabel")gTitle.Size=UDim2.new(1,-120,1,0)gTitle.Position=UDim2.new(0,14,0,0)gTitle.BackgroundTransparency=1 gTitle.Text="Games 7d"gTitle.TextColor3=THEME.text gTitle.Font=Enum.Font.GothamBold gTitle.TextSize=24 gTitle.TextXAlignment=Enum.TextXAlignment.Left gTitle.Parent=gHead
+local gClose=Instance.new("TextButton")gClose.Size=UDim2.new(0,44,0,44)gClose.Position=UDim2.new(1,-50,0,6)gClose.BackgroundColor3=THEME.danger gClose.Text="✕"gClose.TextColor3=Color3.new(1,1,1)gClose.Font=Enum.Font.GothamBold gClose.TextSize=20 gClose.Parent=gHead uiCorner(gClose,10)pulse(gClose)
+gClose.MouseButton1Click:Connect(function()GamesModal.Visible=false end)
+local gBody=Instance.new("ScrollingFrame")gBody.Size=UDim2.new(1,0,1,-(56+16))gBody.Position=UDim2.new(0,0,0,56+8)gBody.BackgroundTransparency=1 gBody.ScrollBarThickness=10 gBody.Parent=GamesModal
+local gList=Instance.new("UIListLayout")gList.Parent=gBody gList.Padding=UDim.new(0,8)gList.SortOrder=Enum.SortOrder.LayoutOrder
+local gHint=Instance.new("TextLabel")gHint.Size=UDim2.new(1,0,0,28)gHint.Position=UDim2.new(0,0,1,-30)gHint.BackgroundTransparency=1 gHint.Text="Friends only. Tracks from now on."gHint.TextColor3=THEME.muted gHint.Font=Enum.Font.Gotham gHint.TextSize=14 gHint.Parent=GamesModal gHint.TextXAlignment=Enum.TextXAlignment.Left
+
+local function formatMinutes(sec)local m=math.floor(sec/60)return tostring(m) end
+local function addGameRow(parent,idx,name,minutes,placeId)
+	local r=Instance.new("TextLabel")r.Size=UDim2.new(1,-8,0,42)r.BackgroundColor3=THEME.card r.Text=string.format("  %d. %s  —  %s min",idx,name,minutes)r.TextXAlignment=Enum.TextXAlignment.Left r.TextColor3=THEME.text r.Font=Enum.Font.Gotham r.TextSize=17 uiCorner(r,10)uiStroke(r,1)r.Parent=parent
+end
+
+local function openGamesModalForUser(userId,displayName)
+	for _,c in ipairs(gBody:GetChildren())do if c:IsA("TextLabel")then c:Destroy()end end
+	gTitle.Text="Games 7d — @"..tostring(displayName or userId)
+	local list=aggregate7Days(userId)
+	if #list==0 then
+		addGameRow(gBody,1,"No data yet",0,0)
+	else
+		for i,item in ipairs(list)do
+			addGameRow(gBody,i,item.name,formatMinutes(item.seconds),item.placeId)
+		end
+	end
+	task.defer(function()gBody.CanvasSize=UDim2.new(0,0,0,gList.AbsoluteContentSize.Y+10)end)
+	GamesModal.Visible=true
+end
+
 local selPlayer=nil
 local function openDetails(player)
 	selPlayer=player
@@ -394,6 +570,14 @@ local function openDetails(player)
 	bigBtn(pageU,"Stop Animations",THEME.header,function()stopAllAnims()end,nil)
 	bigBtn(pageU,"More Info",THEME.header,function()
 		fillMore(player) more.Visible=true pickInfo(1)
+	end,nil)
+	bigBtn(pageU,"Games 7d",THEME.header,function()
+		if not localPlayer:IsFriendsWith(player.UserId) then
+			openGamesModalForUser(player.UserId,player.Name)
+			return
+		end
+		local started=startTrackingUser(player.UserId)
+		openGamesModalForUser(player.UserId,player.Name)
 	end,nil)
 	pickTab("A")
 	if layoutMode=="mobile" then
@@ -423,7 +607,7 @@ local function refreshCanvas()task.defer(function()list.CanvasSize=UDim2.new(0,0
 
 for _,p in ipairs(Players:GetPlayers())do makeRow(p)end refreshCanvas()
 Players.PlayerAdded:Connect(function(p)makeRow(p)refreshCanvas()end)
-Players.PlayerRemoving:Connect(function(p)local r=list:FindFirstChild(p.Name.."_Row")if r then r:Destroy()end refreshCanvas() joinTimes[p],respawnTimes[p],lastPos[p],suspiciousTP[p],AFKTracker[p]=nil,nil,nil,nil,nil end)
+Players.PlayerRemoving:Connect(function(p)local r=list:FindFirstChild(p.Name.."_Row")if r then r:Destroy()end refreshCanvas() joinTimes[p],respawnTimes[p],lastPos[p],suspiciousTP[p],AFKTracker[p]=nil,nil,nil,nil,nil stopTrackingUser(p.UserId)end)
 
 searchBox:GetPropertyChangedSignal("Text"):Connect(function()
 	local q=string.lower(searchBox.Text or "")
@@ -447,7 +631,7 @@ local function dragify(frame)
 	UserInputService.InputChanged:Connect(function(i)if i==dragInput and dragging then update(i)end end)
 end
 
-dragify(root)dragify(details)dragify(more)
+dragify(root)dragify(details)dragify(more)dragify(GamesModal)
 
 local settings=Instance.new("Frame")settings.Size=UDim2.new(0,layoutMode=="mobile" and 320 or 360,0,300)settings.BackgroundColor3=THEME.panel settings.Visible=false settings.Parent=screenGui uiCorner(settings,12)uiStroke(settings,1)pad(settings,12,12,12,12)
 settings.Position=UDim2.new(0.5,-settings.Size.X.Offset/2,0.5,-150)
@@ -502,3 +686,4 @@ openRoot()
 
 _G.OpenPlayerDetails=openDetails
 _G.OpenMoreInfo=openMore
+_G.OpenGames=function(userId,username)openGamesModalForUser(userId,username or tostring(userId))end
