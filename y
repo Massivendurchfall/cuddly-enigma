@@ -669,16 +669,6 @@ Tabs.Anim:CreateDropdown({
         local name=typeof(v)=="table" and v[1] or v
         populateFromPack(name)
         rebuildAppliedIds()
-        if ddIdle and ddWalk then
-            ddIdle:Set({Options=StateList.idle,CurrentOption=labelFor("idle",AnimSelection.idle)})
-            ddWalk:Set({Options=StateList.walk,CurrentOption=labelFor("walk",AnimSelection.walk)})
-            ddRun:Set({Options=StateList.run,CurrentOption=labelFor("run",AnimSelection.run)})
-            ddJump:Set({Options=StateList.jump,CurrentOption=labelFor("jump",AnimSelection.jump)})
-            ddFall:Set({Options=StateList.fall,CurrentOption=labelFor("fall",AnimSelection.fall)})
-            ddClimb:Set({Options=StateList.climb,CurrentOption=labelFor("climb",AnimSelection.climb)})
-            ddSwim:Set({Options=StateList.swim,CurrentOption=labelFor("swim",AnimSelection.swim)})
-            ddSwimIdle:Set({Options=StateList.swimidle,CurrentOption=labelFor("swimidle",AnimSelection.swimidle)})
-        end
     end
 })
 
