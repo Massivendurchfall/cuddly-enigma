@@ -90,10 +90,10 @@ local function clearHighlight(model)
     end
 end
 
-local Window   = Rayfield:CreateWindow({
+local Window = Rayfield:CreateWindow({
     Name="Violence District",
     LoadingTitle="Violence District",
-    LoadingSubtitle="by jlcfg",
+    LoadingSubtitle="by jlcfg (Fixed Vault)",
     ConfigurationSaving={Enabled=true,FolderName="VD_Suite",FileName="vd_config_v3"},
     KeySystem=false
 })
@@ -727,12 +727,16 @@ local function nsDisable()
 end
 TabVisual:CreateToggle({Name="No Shadows",CurrentValue=false,Flag="NoShadows",Callback=function(s) if s then nsEnable() else nsDisable() end end})
 
+-- MOVEMENT SECTION --
 local speedCurrent, speedHumanoid = 16, nil
 local speedEnforced, speedPaused = false, false
 local speedStunUntil, speedSlowUntil = 0, 0
 local speedTickConn, wsConn, stConn, pfConn, anConn = nil, nil, nil, nil, nil
 local speedLastTick, speedTickInterval = 0, 0.12
 local serverBaseline = nil
+
+-- NEW: Variable to track vault/slide state
+local isVaulting = false
 
 local function canonicalDefault()
     local ok,val = pcall(function() return StarterPlayer.CharacterWalkSpeed end)
@@ -763,6 +767,10 @@ local function canEnforce()
     if not speedEnforced then return false end
     if not h or not h.Parent then return false end
     if speedPaused then return false end
+    
+    -- NEW: Don't enforce speed if we are currently vaulting/sliding
+    if isVaulting then return false end
+    
     if now()<speedStunUntil or now()<speedSlowUntil then return false end
     if h.Health<=0 then return false end
     if h.PlatformStand or h.Sit then return false end
@@ -946,10 +954,18 @@ local function connectRemote(inst)
             local hrp=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart"); if not hrp then return end
             local best,bd=nil,1e9
             for m,e in pairs(worldReg.Palletwrong) do if e and e.part then local d=dist(e.part.Position,hrp.Position) if d<bd then bd=d best=m end end end
-            if best then palletState[best]="SLIDE" task.delay(1.4,function() if palletState[best]=="SLIDE" then palletState[best]="UP" end end) end
+            if best then 
+                palletState[best]="SLIDE"
+                -- NEW: Disable speed lock during slide
+                isVaulting = true
+                task.delay(1.5, function() if isVaulting then isVaulting=false end end) -- Failsafe
+                task.delay(1.4,function() if palletState[best]=="SLIDE" then palletState[best]="UP" end end) 
+            end
         end)
         elseif inst.Name=="PalletSlideCompleteEvent" then hook(function()
             local hrp=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+            -- NEW: Re-enable speed lock
+            isVaulting = false
             local best,bd=nil,1e9
             for m,e in pairs(worldReg.Palletwrong) do if e and e.part then local d=dist(e.part.Position,hrp.Position) if d<bd then bd=d best=m end end end
             if best and palletState[best]~="DEST" then palletState[best]="UP" end
@@ -961,10 +977,18 @@ local function connectRemote(inst)
             local hrp=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart"); if not hrp then return end
             local best,bd=nil,1e9
             for m,e in pairs(worldReg.Window) do if e and e.part then local d=dist(e.part.Position,hrp.Position) if d<bd then bd=d best=m end end end
-            if best then windowState[best]="BUSY" task.delay(1.2,function() if windowState[best]=="BUSY" then windowState[best]="READY" end end) end
+            if best then 
+                windowState[best]="BUSY"
+                -- NEW: Disable speed lock during vault
+                isVaulting = true
+                task.delay(1.5, function() if isVaulting then isVaulting=false end end) -- Failsafe
+                task.delay(1.2,function() if windowState[best]=="BUSY" then windowState[best]="READY" end end) 
+            end
         end)
         elseif inst.Name=="VaultCompleteEvent" then hook(function()
             local hrp=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+            -- NEW: Re-enable speed lock
+            isVaulting = false
             local best,bd=nil,1e9
             for m,e in pairs(worldReg.Window) do if e and e.part then local d=dist(e.part.Position,hrp.Position) if d<bd then bd=d best=m end end end
             if best then windowState[best]="READY" end
@@ -1409,4 +1433,4 @@ task.defer(function()
     end
 end)
 Rayfield:Notify({Title="Violence District",Content="Loaded",Duration=6})
-Rayfield:Notify({Title="Info",Content="Fog purge by name enabled • ESP stable • Killer Speed-Auto-Off",Duration=6})
+Rayfield:Notify({Title="Info",Content="Vault Speed Fix Applied",Duration=6})
